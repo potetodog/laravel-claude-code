@@ -1,11 +1,11 @@
 ---
 name: security-review
-description: Use this skill when adding authentication, handling user input, working with secrets, creating API endpoints, or implementing payment/sensitive features. Provides comprehensive security checklist and patterns.
+description: Use this skill when adding authentication, handling user input, working with secrets, creating API endpoints, or implementing payment/sensitive features. Provides comprehensive security checklist and patterns for Laravel.
 ---
 
 # Security Review Skill
 
-This skill ensures all code follows security best practices and identifies potential vulnerabilities.
+This skill ensures all Laravel code follows security best practices and identifies potential vulnerabilities.
 
 ## When to Activate
 
@@ -21,473 +21,601 @@ This skill ensures all code follows security best practices and identifies poten
 
 ### 1. Secrets Management
 
-#### ❌ NEVER Do This
-```typescript
-const apiKey = "sk-proj-xxxxx"  // Hardcoded secret
-const dbPassword = "password123" // In source code
+#### Never Do This
+```php
+// Hardcoded secrets - DANGEROUS
+$apiKey = "sk-proj-xxxxx";
+$dbPassword = "password123";
 ```
 
-#### ✅ ALWAYS Do This
-```typescript
-const apiKey = process.env.OPENAI_API_KEY
-const dbUrl = process.env.DATABASE_URL
+#### Always Do This
+```php
+// Use environment variables
+$apiKey = config('services.openai.key');
+$dbUrl = config('database.connections.pgsql.url');
 
 // Verify secrets exist
-if (!apiKey) {
-  throw new Error('OPENAI_API_KEY not configured')
+if (!$apiKey) {
+    throw new RuntimeException('OPENAI_API_KEY not configured');
 }
 ```
 
 #### Verification Steps
 - [ ] No hardcoded API keys, tokens, or passwords
-- [ ] All secrets in environment variables
-- [ ] `.env.local` in .gitignore
+- [ ] All secrets in `.env` file
+- [ ] `.env` in `.gitignore`
 - [ ] No secrets in git history
-- [ ] Production secrets in hosting platform (Vercel, Railway)
+- [ ] Production secrets in hosting platform (Forge, Vapor)
 
 ### 2. Input Validation
 
-#### Always Validate User Input
-```typescript
-import { z } from 'zod'
+#### Always Validate User Input with Form Requests
+```php
+<?php
 
-// Define validation schema
-const CreateUserSchema = z.object({
-  email: z.string().email(),
-  name: z.string().min(1).max(100),
-  age: z.number().int().min(0).max(150)
-})
+declare(strict_types=1);
 
-// Validate before processing
-export async function createUser(input: unknown) {
-  try {
-    const validated = CreateUserSchema.parse(input)
-    return await db.users.create(validated)
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return { success: false, errors: error.errors }
+namespace App\Http\Requests;
+
+use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
+
+final class StoreUserRequest extends FormRequest
+{
+    public function authorize(): bool
+    {
+        return true;
     }
-    throw error
-  }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function rules(): array
+    {
+        return [
+            'email' => ['required', 'email', 'max:255', Rule::unique('users')],
+            'name' => ['required', 'string', 'min:1', 'max:100'],
+            'age' => ['nullable', 'integer', 'min:0', 'max:150'],
+        ];
+    }
+}
+```
+
+#### Custom Validation Rules
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Rules;
+
+use Closure;
+use Illuminate\Contracts\Validation\ValidationRule;
+
+final class SafeFilename implements ValidationRule
+{
+    public function validate(string $attribute, mixed $value, Closure $fail): void
+    {
+        if (!preg_match('/^[\w\-. ]+$/', $value)) {
+            $fail('The :attribute contains invalid characters.');
+        }
+    }
 }
 ```
 
 #### File Upload Validation
-```typescript
-function validateFileUpload(file: File) {
-  // Size check (5MB max)
-  const maxSize = 5 * 1024 * 1024
-  if (file.size > maxSize) {
-    throw new Error('File too large (max 5MB)')
-  }
+```php
+public function rules(): array
+{
+    return [
+        'avatar' => [
+            'required',
+            'file',
+            'image',
+            'mimes:jpeg,png,gif',
+            'max:5120', // 5MB in kilobytes
+            'dimensions:max_width=2000,max_height=2000',
+        ],
+    ];
+}
 
-  // Type check
-  const allowedTypes = ['image/jpeg', 'image/png', 'image/gif']
-  if (!allowedTypes.includes(file.type)) {
-    throw new Error('Invalid file type')
-  }
+// In controller
+public function store(StoreAvatarRequest $request): RedirectResponse
+{
+    $path = $request->file('avatar')->store('avatars', 'public');
 
-  // Extension check
-  const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif']
-  const extension = file.name.toLowerCase().match(/\.[^.]+$/)?.[0]
-  if (!extension || !allowedExtensions.includes(extension)) {
-    throw new Error('Invalid file extension')
-  }
+    $request->user()->update(['avatar_path' => $path]);
 
-  return true
+    return redirect()->back()->with('success', 'Avatar uploaded.');
 }
 ```
 
 #### Verification Steps
-- [ ] All user inputs validated with schemas
+- [ ] All user inputs validated with Form Requests
 - [ ] File uploads restricted (size, type, extension)
-- [ ] No direct use of user input in queries
+- [ ] No direct use of `$request->all()` without validation
 - [ ] Whitelist validation (not blacklist)
 - [ ] Error messages don't leak sensitive info
 
 ### 3. SQL Injection Prevention
 
-#### ❌ NEVER Concatenate SQL
-```typescript
+#### Never Concatenate SQL
+```php
 // DANGEROUS - SQL Injection vulnerability
-const query = `SELECT * FROM users WHERE email = '${userEmail}'`
-await db.query(query)
+$email = $request->email;
+$users = DB::select("SELECT * FROM users WHERE email = '$email'");
 ```
 
-#### ✅ ALWAYS Use Parameterized Queries
-```typescript
-// Safe - parameterized query
-const { data } = await supabase
-  .from('users')
-  .select('*')
-  .eq('email', userEmail)
+#### Always Use Eloquent or Parameterized Queries
+```php
+// Safe - Eloquent ORM
+$user = User::where('email', $request->validated('email'))->first();
 
-// Or with raw SQL
-await db.query(
-  'SELECT * FROM users WHERE email = $1',
-  [userEmail]
-)
+// Safe - Query Builder with bindings
+$users = DB::table('users')
+    ->where('email', $request->validated('email'))
+    ->get();
+
+// Safe - Raw query with bindings
+$users = DB::select(
+    'SELECT * FROM users WHERE email = ?',
+    [$request->validated('email')]
+);
+
+// Safe - Named bindings
+$users = DB::select(
+    'SELECT * FROM users WHERE email = :email',
+    ['email' => $request->validated('email')]
+);
 ```
 
 #### Verification Steps
-- [ ] All database queries use parameterized queries
+- [ ] All database queries use Eloquent or parameterized queries
 - [ ] No string concatenation in SQL
-- [ ] ORM/query builder used correctly
-- [ ] Supabase queries properly sanitized
+- [ ] `whereRaw()` uses bindings
+- [ ] No `DB::unprepared()` with user input
 
 ### 4. Authentication & Authorization
 
-#### JWT Token Handling
-```typescript
-// ❌ WRONG: localStorage (vulnerable to XSS)
-localStorage.setItem('token', token)
+#### Sanctum Token Handling
+```php
+// Good: Use Sanctum for API authentication
+// config/auth.php
+'guards' => [
+    'api' => [
+        'driver' => 'sanctum',
+        'provider' => 'users',
+    ],
+],
 
-// ✅ CORRECT: httpOnly cookies
-res.setHeader('Set-Cookie',
-  `token=${token}; HttpOnly; Secure; SameSite=Strict; Max-Age=3600`)
-```
+// Controller
+public function login(LoginRequest $request): JsonResponse
+{
+    $credentials = $request->validated();
 
-#### Authorization Checks
-```typescript
-export async function deleteUser(userId: string, requesterId: string) {
-  // ALWAYS verify authorization first
-  const requester = await db.users.findUnique({
-    where: { id: requesterId }
-  })
+    if (!Auth::attempt($credentials)) {
+        throw ValidationException::withMessages([
+            'email' => ['The provided credentials are incorrect.'],
+        ]);
+    }
 
-  if (requester.role !== 'admin') {
-    return NextResponse.json(
-      { error: 'Unauthorized' },
-      { status: 403 }
-    )
-  }
+    $user = Auth::user();
+    $token = $user->createToken('api-token')->plainTextToken;
 
-  // Proceed with deletion
-  await db.users.delete({ where: { id: userId } })
+    return response()->json([
+        'token' => $token,
+        'user' => new UserResource($user),
+    ]);
 }
 ```
 
-#### Row Level Security (Supabase)
-```sql
--- Enable RLS on all tables
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+#### Policy-Based Authorization
+```php
+<?php
 
--- Users can only view their own data
-CREATE POLICY "Users view own data"
-  ON users FOR SELECT
-  USING (auth.uid() = id);
+declare(strict_types=1);
 
--- Users can only update their own data
-CREATE POLICY "Users update own data"
-  ON users FOR UPDATE
-  USING (auth.uid() = id);
+namespace App\Policies;
+
+use App\Models\Market;
+use App\Models\User;
+
+final class MarketPolicy
+{
+    public function view(User $user, Market $market): bool
+    {
+        return true;
+    }
+
+    public function update(User $user, Market $market): bool
+    {
+        return $user->id === $market->user_id;
+    }
+
+    public function delete(User $user, Market $market): bool
+    {
+        return $user->id === $market->user_id || $user->is_admin;
+    }
+}
+
+// In Controller
+public function update(UpdateMarketRequest $request, Market $market): MarketResource
+{
+    $this->authorize('update', $market);
+
+    $market->update($request->validated());
+
+    return new MarketResource($market);
+}
+```
+
+#### Gate-Based Authorization
+```php
+// app/Providers/AppServiceProvider.php
+use Illuminate\Support\Facades\Gate;
+
+public function boot(): void
+{
+    Gate::define('access-admin', function (User $user): bool {
+        return $user->is_admin;
+    });
+}
+
+// In Controller or Middleware
+if (Gate::denies('access-admin')) {
+    abort(403);
+}
 ```
 
 #### Verification Steps
-- [ ] Tokens stored in httpOnly cookies (not localStorage)
-- [ ] Authorization checks before sensitive operations
-- [ ] Row Level Security enabled in Supabase
-- [ ] Role-based access control implemented
+- [ ] Sanctum/Passport for API authentication
+- [ ] Authorization checks via Policies/Gates
+- [ ] Password hashing with bcrypt (Laravel default)
 - [ ] Session management secure
+- [ ] Remember token regenerated on login
 
 ### 5. XSS Prevention
 
-#### Sanitize HTML
-```typescript
-import DOMPurify from 'isomorphic-dompurify'
+#### Blade Auto-Escaping
+```php
+// Good: Blade auto-escapes output
+<h1>{{ $user->name }}</h1>
 
-// ALWAYS sanitize user-provided HTML
-function renderUserContent(html: string) {
-  const clean = DOMPurify.sanitize(html, {
-    ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'p'],
-    ALLOWED_ATTR: []
-  })
-  return <div dangerouslySetInnerHTML={{ __html: clean }} />
-}
+// Dangerous: Unescaped output
+<h1>{!! $user->bio !!}</h1>  // Only use for trusted HTML
+
+// If you must render HTML, sanitize it
+use Stevebauman\Purify\Facades\Purify;
+
+<div>{!! Purify::clean($user->bio) !!}</div>
 ```
 
 #### Content Security Policy
-```typescript
-// next.config.js
-const securityHeaders = [
-  {
-    key: 'Content-Security-Policy',
-    value: `
-      default-src 'self';
-      script-src 'self' 'unsafe-eval' 'unsafe-inline';
-      style-src 'self' 'unsafe-inline';
-      img-src 'self' data: https:;
-      font-src 'self';
-      connect-src 'self' https://api.example.com;
-    `.replace(/\s{2,}/g, ' ').trim()
-  }
-]
-```
+```php
+// app/Http/Middleware/SecurityHeaders.php
+<?php
 
-#### Verification Steps
-- [ ] User-provided HTML sanitized
-- [ ] CSP headers configured
-- [ ] No unvalidated dynamic content rendering
-- [ ] React's built-in XSS protection used
+declare(strict_types=1);
 
-### 6. CSRF Protection
+namespace App\Http\Middleware;
 
-#### CSRF Tokens
-```typescript
-import { csrf } from '@/lib/csrf'
+use Closure;
+use Illuminate\Http\Request;
 
-export async function POST(request: Request) {
-  const token = request.headers.get('X-CSRF-Token')
+final class SecurityHeaders
+{
+    public function handle(Request $request, Closure $next)
+    {
+        $response = $next($request);
 
-  if (!csrf.verify(token)) {
-    return NextResponse.json(
-      { error: 'Invalid CSRF token' },
-      { status: 403 }
-    )
-  }
+        $response->headers->set(
+            'Content-Security-Policy',
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:;"
+        );
 
-  // Process request
+        $response->headers->set('X-Frame-Options', 'SAMEORIGIN');
+        $response->headers->set('X-Content-Type-Options', 'nosniff');
+        $response->headers->set('Referrer-Policy', 'strict-origin-when-cross-origin');
+
+        return $response;
+    }
 }
 ```
 
-#### SameSite Cookies
-```typescript
-res.setHeader('Set-Cookie',
-  `session=${sessionId}; HttpOnly; Secure; SameSite=Strict`)
+#### Verification Steps
+- [ ] Use `{{ }}` for output (auto-escaping)
+- [ ] `{!! !!}` only for trusted, sanitized HTML
+- [ ] CSP headers configured
+- [ ] No inline JavaScript with user data
+
+### 6. CSRF Protection
+
+#### Laravel's Built-in CSRF Protection
+```php
+// Blade form
+<form method="POST" action="{{ route('markets.store') }}">
+    @csrf
+    <!-- form fields -->
+</form>
+
+// Inertia.js handles CSRF automatically via cookies
+
+// For AJAX requests, include the CSRF token
+// resources/js/bootstrap.js
+axios.defaults.headers.common['X-CSRF-TOKEN'] = document
+    .querySelector('meta[name="csrf-token"]')
+    ?.getAttribute('content');
+```
+
+#### Excluding Routes from CSRF (Use Sparingly)
+```php
+// app/Http/Middleware/VerifyCsrfToken.php
+protected $except = [
+    'webhooks/stripe', // Only for legitimate webhooks
+];
 ```
 
 #### Verification Steps
-- [ ] CSRF tokens on state-changing operations
-- [ ] SameSite=Strict on all cookies
-- [ ] Double-submit cookie pattern implemented
+- [ ] `@csrf` directive in all forms
+- [ ] CSRF token in AJAX headers
+- [ ] Webhook routes verify signatures instead
+- [ ] SameSite cookie attribute set
 
 ### 7. Rate Limiting
 
-#### API Rate Limiting
-```typescript
-import rateLimit from 'express-rate-limit'
+#### Define Rate Limiters
+```php
+// bootstrap/app.php
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Support\Facades\RateLimiter;
 
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // 100 requests per window
-  message: 'Too many requests'
-})
+RateLimiter::for('api', function (Request $request) {
+    return Limit::perMinute(60)->by($request->user()?->id ?: $request->ip());
+});
 
-// Apply to routes
-app.use('/api/', limiter)
+RateLimiter::for('login', function (Request $request) {
+    return Limit::perMinute(5)->by($request->ip());
+});
+
+RateLimiter::for('search', function (Request $request) {
+    return Limit::perMinute(10)->by($request->user()?->id ?: $request->ip());
+});
 ```
 
-#### Expensive Operations
-```typescript
-// Aggressive rate limiting for searches
-const searchLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 10, // 10 requests per minute
-  message: 'Too many search requests'
-})
+#### Apply to Routes
+```php
+// routes/api.php
+Route::middleware(['throttle:api'])->group(function () {
+    Route::apiResource('markets', MarketController::class);
+});
 
-app.use('/api/search', searchLimiter)
+Route::middleware(['throttle:login'])->group(function () {
+    Route::post('login', [AuthController::class, 'login']);
+});
+
+Route::middleware(['throttle:search'])->group(function () {
+    Route::get('search', [SearchController::class, 'index']);
+});
 ```
 
 #### Verification Steps
 - [ ] Rate limiting on all API endpoints
+- [ ] Stricter limits on auth endpoints
 - [ ] Stricter limits on expensive operations
-- [ ] IP-based rate limiting
-- [ ] User-based rate limiting (authenticated)
+- [ ] IP-based and user-based rate limiting
 
 ### 8. Sensitive Data Exposure
 
 #### Logging
-```typescript
-// ❌ WRONG: Logging sensitive data
-console.log('User login:', { email, password })
-console.log('Payment:', { cardNumber, cvv })
+```php
+// Bad: Logging sensitive data
+Log::info('User login', ['email' => $email, 'password' => $password]);
+Log::info('Payment', ['card_number' => $cardNumber, 'cvv' => $cvv]);
 
-// ✅ CORRECT: Redact sensitive data
-console.log('User login:', { email, userId })
-console.log('Payment:', { last4: card.last4, userId })
+// Good: Redact sensitive data
+Log::info('User login', ['email' => $email, 'user_id' => $user->id]);
+Log::info('Payment', ['last4' => $card->last4, 'user_id' => $user->id]);
 ```
 
 #### Error Messages
-```typescript
-// ❌ WRONG: Exposing internal details
-catch (error) {
-  return NextResponse.json(
-    { error: error.message, stack: error.stack },
-    { status: 500 }
-  )
+```php
+// Bad: Exposing internal details
+catch (\Exception $e) {
+    return response()->json([
+        'error' => $e->getMessage(),
+        'trace' => $e->getTraceAsString(),
+    ], 500);
 }
 
-// ✅ CORRECT: Generic error messages
-catch (error) {
-  console.error('Internal error:', error)
-  return NextResponse.json(
-    { error: 'An error occurred. Please try again.' },
-    { status: 500 }
-  )
+// Good: Generic error messages
+catch (\Exception $e) {
+    Log::error('Internal error', [
+        'error' => $e->getMessage(),
+        'trace' => $e->getTraceAsString(),
+    ]);
+
+    return response()->json([
+        'message' => 'An error occurred. Please try again.',
+    ], 500);
 }
+```
+
+#### Hide Sensitive Fields from JSON
+```php
+// app/Models/User.php
+protected $hidden = [
+    'password',
+    'remember_token',
+    'two_factor_secret',
+];
 ```
 
 #### Verification Steps
 - [ ] No passwords, tokens, or secrets in logs
 - [ ] Error messages generic for users
-- [ ] Detailed errors only in server logs
-- [ ] No stack traces exposed to users
+- [ ] Detailed errors only in logs
+- [ ] Sensitive model attributes in `$hidden`
+- [ ] API Resources exclude sensitive data
 
-### 9. Blockchain Security (Solana)
+### 9. Mass Assignment Protection
 
-#### Wallet Verification
-```typescript
-import { verify } from '@solana/web3.js'
+#### Fillable vs Guarded
+```php
+// Good: Explicit fillable fields
+final class User extends Model
+{
+    protected $fillable = [
+        'name',
+        'email',
+        'password',
+    ];
+}
 
-async function verifyWalletOwnership(
-  publicKey: string,
-  signature: string,
-  message: string
-) {
-  try {
-    const isValid = verify(
-      Buffer.from(message),
-      Buffer.from(signature, 'base64'),
-      Buffer.from(publicKey, 'base64')
-    )
-    return isValid
-  } catch (error) {
-    return false
-  }
+// Alternative: Guard specific fields
+final class User extends Model
+{
+    protected $guarded = [
+        'id',
+        'is_admin',
+        'email_verified_at',
+    ];
 }
 ```
 
-#### Transaction Verification
-```typescript
-async function verifyTransaction(transaction: Transaction) {
-  // Verify recipient
-  if (transaction.to !== expectedRecipient) {
-    throw new Error('Invalid recipient')
-  }
-
-  // Verify amount
-  if (transaction.amount > maxAmount) {
-    throw new Error('Amount exceeds limit')
-  }
-
-  // Verify user has sufficient balance
-  const balance = await getBalance(transaction.from)
-  if (balance < transaction.amount) {
-    throw new Error('Insufficient balance')
-  }
-
-  return true
-}
+#### Never Use Unguarded
+```php
+// Dangerous: Disabling mass assignment protection
+Model::unguard();
+User::create($request->all());  // User could set is_admin = true
+Model::reguard();
 ```
 
 #### Verification Steps
-- [ ] Wallet signatures verified
-- [ ] Transaction details validated
-- [ ] Balance checks before transactions
-- [ ] No blind transaction signing
+- [ ] All models have `$fillable` or `$guarded`
+- [ ] Sensitive fields excluded from mass assignment
+- [ ] No `Model::unguard()` with user input
+- [ ] Use `$request->validated()` not `$request->all()`
 
 ### 10. Dependency Security
 
 #### Regular Updates
 ```bash
 # Check for vulnerabilities
-npm audit
-
-# Fix automatically fixable issues
-npm audit fix
+composer audit
 
 # Update dependencies
-npm update
+composer update
 
 # Check for outdated packages
-npm outdated
+composer outdated
 ```
 
 #### Lock Files
 ```bash
-# ALWAYS commit lock files
-git add package-lock.json
+# Always commit lock files
+git add composer.lock package-lock.json
 
 # Use in CI/CD for reproducible builds
-npm ci  # Instead of npm install
+composer install --no-dev --optimize-autoloader
+npm ci
 ```
 
 #### Verification Steps
 - [ ] Dependencies up to date
-- [ ] No known vulnerabilities (npm audit clean)
+- [ ] No known vulnerabilities (`composer audit`)
 - [ ] Lock files committed
-- [ ] Dependabot enabled on GitHub
-- [ ] Regular security updates
+- [ ] Dependabot/Renovate enabled
 
 ## Security Testing
 
-### Automated Security Tests
-```typescript
-// Test authentication
-test('requires authentication', async () => {
-  const response = await fetch('/api/protected')
-  expect(response.status).toBe(401)
-})
+### Automated Security Tests with Pest
+```php
+<?php
 
-// Test authorization
-test('requires admin role', async () => {
-  const response = await fetch('/api/admin', {
-    headers: { Authorization: `Bearer ${userToken}` }
-  })
-  expect(response.status).toBe(403)
-})
+use App\Models\User;
+use App\Models\Market;
 
-// Test input validation
-test('rejects invalid input', async () => {
-  const response = await fetch('/api/users', {
-    method: 'POST',
-    body: JSON.stringify({ email: 'not-an-email' })
-  })
-  expect(response.status).toBe(400)
-})
+test('requires authentication', function () {
+    $this->getJson(route('api.markets.index'))
+        ->assertUnauthorized();
+});
 
-// Test rate limiting
-test('enforces rate limits', async () => {
-  const requests = Array(101).fill(null).map(() =>
-    fetch('/api/endpoint')
-  )
+test('requires authorization to update market', function () {
+    $user = User::factory()->create();
+    $market = Market::factory()->create(); // Different owner
 
-  const responses = await Promise.all(requests)
-  const tooManyRequests = responses.filter(r => r.status === 429)
+    $this->actingAs($user)
+        ->putJson(route('api.markets.update', $market), [
+            'name' => 'Updated Name',
+        ])
+        ->assertForbidden();
+});
 
-  expect(tooManyRequests.length).toBeGreaterThan(0)
-})
+test('validates input', function () {
+    $user = User::factory()->create();
+
+    $this->actingAs($user)
+        ->postJson(route('api.markets.store'), [
+            'name' => '', // Invalid
+        ])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['name']);
+});
+
+test('enforces rate limits', function () {
+    $user = User::factory()->create();
+
+    // Make requests up to the limit
+    for ($i = 0; $i < 60; $i++) {
+        $this->actingAs($user)
+            ->getJson(route('api.markets.index'));
+    }
+
+    // Next request should be rate limited
+    $this->actingAs($user)
+        ->getJson(route('api.markets.index'))
+        ->assertStatus(429);
+});
+
+test('prevents SQL injection', function () {
+    $user = User::factory()->create();
+
+    $this->actingAs($user)
+        ->getJson(route('api.markets.index', [
+            'search' => "'; DROP TABLE markets; --",
+        ]))
+        ->assertOk(); // Should not error or drop table
+});
 ```
 
 ## Pre-Deployment Security Checklist
 
 Before ANY production deployment:
 
-- [ ] **Secrets**: No hardcoded secrets, all in env vars
-- [ ] **Input Validation**: All user inputs validated
+- [ ] **Secrets**: No hardcoded secrets, all in `.env`
+- [ ] **Input Validation**: All inputs validated via Form Requests
 - [ ] **SQL Injection**: All queries parameterized
-- [ ] **XSS**: User content sanitized
-- [ ] **CSRF**: Protection enabled
-- [ ] **Authentication**: Proper token handling
-- [ ] **Authorization**: Role checks in place
+- [ ] **XSS**: Output escaped, CSP headers configured
+- [ ] **CSRF**: Protection enabled on all forms
+- [ ] **Authentication**: Sanctum/Passport configured
+- [ ] **Authorization**: Policies for all models
 - [ ] **Rate Limiting**: Enabled on all endpoints
-- [ ] **HTTPS**: Enforced in production
+- [ ] **HTTPS**: Enforced in production (`APP_URL=https://...`)
 - [ ] **Security Headers**: CSP, X-Frame-Options configured
 - [ ] **Error Handling**: No sensitive data in errors
 - [ ] **Logging**: No sensitive data logged
 - [ ] **Dependencies**: Up to date, no vulnerabilities
-- [ ] **Row Level Security**: Enabled in Supabase
+- [ ] **Mass Assignment**: All models protected
 - [ ] **CORS**: Properly configured
 - [ ] **File Uploads**: Validated (size, type)
-- [ ] **Wallet Signatures**: Verified (if blockchain)
+- [ ] **Debug Mode**: `APP_DEBUG=false` in production
 
 ## Resources
 
+- [Laravel Security Documentation](https://laravel.com/docs/security)
 - [OWASP Top 10](https://owasp.org/www-project-top-ten/)
-- [Next.js Security](https://nextjs.org/docs/security)
-- [Supabase Security](https://supabase.com/docs/guides/auth)
-- [Web Security Academy](https://portswigger.net/web-security)
+- [Laravel Security Best Practices](https://laravel.com/docs/deployment#optimization)
+- [Sanctum Documentation](https://laravel.com/docs/sanctum)
 
 ---
 

@@ -1,11 +1,11 @@
 ---
 name: tdd-workflow
-description: Use this skill when writing new features, fixing bugs, or refactoring code. Enforces test-driven development with 80%+ coverage including unit, integration, and E2E tests.
+description: Use this skill when writing new features, fixing bugs, or refactoring code. Enforces test-driven development with Pest PHP, including unit, feature, and integration tests with 80%+ coverage.
 ---
 
 # Test-Driven Development Workflow
 
-This skill ensures all code development follows TDD principles with comprehensive test coverage.
+This skill ensures all Laravel code development follows TDD principles with comprehensive test coverage using Pest PHP.
 
 ## When to Activate
 
@@ -13,7 +13,8 @@ This skill ensures all code development follows TDD principles with comprehensiv
 - Fixing bugs or issues
 - Refactoring existing code
 - Adding API endpoints
-- Creating new components
+- Creating new Actions/Services
+- Modifying Eloquent models
 
 ## Core Principles
 
@@ -21,7 +22,7 @@ This skill ensures all code development follows TDD principles with comprehensiv
 ALWAYS write tests first, then implement code to make tests pass.
 
 ### 2. Coverage Requirements
-- Minimum 80% coverage (unit + integration + E2E)
+- Minimum 80% coverage (unit + feature)
 - All edge cases covered
 - Error scenarios tested
 - Boundary conditions verified
@@ -29,76 +30,89 @@ ALWAYS write tests first, then implement code to make tests pass.
 ### 3. Test Types
 
 #### Unit Tests
-- Individual functions and utilities
-- Component logic
-- Pure functions
+- Individual Actions and Services
+- DTOs and Value Objects
+- Query Builders
 - Helpers and utilities
 
-#### Integration Tests
-- API endpoints
-- Database operations
-- Service interactions
-- External API calls
+#### Feature Tests
+- HTTP endpoints (API and web)
+- Full request/response cycle
+- Authentication flows
+- Database interactions
 
-#### E2E Tests (Playwright)
-- Critical user flows
-- Complete workflows
-- Browser automation
-- UI interactions
+#### Integration Tests
+- External API integrations
+- Queue job processing
+- Event/Listener chains
+- Mail and notifications
 
 ## TDD Workflow Steps
 
-### Step 1: Write User Journeys
+### Step 1: Write User Stories
 ```
 As a [role], I want to [action], so that [benefit]
 
 Example:
-As a user, I want to search for markets semantically,
-so that I can find relevant markets even without exact keywords.
+As a user, I want to create a market,
+so that I can start accepting orders.
 ```
 
 ### Step 2: Generate Test Cases
-For each user journey, create comprehensive test cases:
+For each user story, create comprehensive test cases:
 
-```typescript
-describe('Semantic Search', () => {
-  it('returns relevant markets for query', async () => {
-    // Test implementation
-  })
+```php
+<?php
 
-  it('handles empty query gracefully', async () => {
-    // Test edge case
-  })
+use App\Models\User;
+use App\Models\Market;
 
-  it('falls back to substring search when Redis unavailable', async () => {
-    // Test fallback behavior
-  })
+describe('Create Market', function () {
+    beforeEach(function () {
+        $this->user = User::factory()->create();
+    });
 
-  it('sorts results by similarity score', async () => {
-    // Test sorting logic
-  })
-})
+    test('user can create market with valid data', function () {
+        // Test implementation
+    });
+
+    test('returns validation errors for invalid data', function () {
+        // Test edge case
+    });
+
+    test('requires authentication', function () {
+        // Test auth requirement
+    });
+
+    test('fires MarketCreated event', function () {
+        // Test event dispatch
+    });
+});
 ```
 
 ### Step 3: Run Tests (They Should Fail)
 ```bash
-npm test
+php artisan test
 # Tests should fail - we haven't implemented yet
 ```
 
 ### Step 4: Implement Code
 Write minimal code to make tests pass:
 
-```typescript
+```php
 // Implementation guided by tests
-export async function searchMarkets(query: string) {
-  // Implementation here
+final class CreateMarketAction
+{
+    public function execute(CreateMarketData $data): Market
+    {
+        // Implementation here
+    }
 }
 ```
 
 ### Step 5: Run Tests Again
 ```bash
-npm test
+php artisan test
 # Tests should now pass
 ```
 
@@ -111,275 +125,517 @@ Improve code quality while keeping tests green:
 
 ### Step 7: Verify Coverage
 ```bash
-npm run test:coverage
+php artisan test --coverage --min=80
 # Verify 80%+ coverage achieved
 ```
 
-## Testing Patterns
+## Testing Patterns with Pest PHP
 
-### Unit Test Pattern (Jest/Vitest)
-```typescript
-import { render, screen, fireEvent } from '@testing-library/react'
-import { Button } from './Button'
+### Unit Test Pattern
+```php
+<?php
 
-describe('Button Component', () => {
-  it('renders with correct text', () => {
-    render(<Button>Click me</Button>)
-    expect(screen.getByText('Click me')).toBeInTheDocument()
-  })
+use App\Actions\Market\CreateMarketAction;
+use App\DTOs\CreateMarketData;
+use App\Models\User;
+use App\Models\Market;
+use App\Models\Category;
 
-  it('calls onClick when clicked', () => {
-    const handleClick = jest.fn()
-    render(<Button onClick={handleClick}>Click</Button>)
+beforeEach(function () {
+    $this->user = User::factory()->create();
+    $this->category = Category::factory()->create();
+});
 
-    fireEvent.click(screen.getByRole('button'))
+test('creates market with valid data', function () {
+    // Arrange
+    $data = new CreateMarketData(
+        userId: $this->user->id,
+        name: 'Test Market',
+        description: 'Test Description',
+        endDate: now()->addDays(30),
+        categoryIds: [$this->category->id],
+    );
 
-    expect(handleClick).toHaveBeenCalledTimes(1)
-  })
+    // Act
+    $market = app(CreateMarketAction::class)->execute($data);
 
-  it('is disabled when disabled prop is true', () => {
-    render(<Button disabled>Click</Button>)
-    expect(screen.getByRole('button')).toBeDisabled()
-  })
-})
+    // Assert
+    expect($market)
+        ->toBeInstanceOf(Market::class)
+        ->name->toBe('Test Market')
+        ->description->toBe('Test Description')
+        ->user_id->toBe($this->user->id);
+
+    expect($market->categories)->toHaveCount(1);
+
+    $this->assertDatabaseHas('markets', [
+        'name' => 'Test Market',
+        'user_id' => $this->user->id,
+    ]);
+});
+
+test('wraps operation in transaction', function () {
+    $data = new CreateMarketData(
+        userId: $this->user->id,
+        name: 'Test Market',
+        description: 'Test Description',
+        endDate: now()->addDays(30),
+        categoryIds: [999], // Non-existent category
+    );
+
+    expect(fn () => app(CreateMarketAction::class)->execute($data))
+        ->toThrow(\Exception::class);
+
+    $this->assertDatabaseMissing('markets', [
+        'name' => 'Test Market',
+    ]);
+});
 ```
 
-### API Integration Test Pattern
-```typescript
-import { NextRequest } from 'next/server'
-import { GET } from './route'
+### Feature Test Pattern (HTTP)
+```php
+<?php
 
-describe('GET /api/markets', () => {
-  it('returns markets successfully', async () => {
-    const request = new NextRequest('http://localhost/api/markets')
-    const response = await GET(request)
-    const data = await response.json()
+use App\Models\User;
+use App\Models\Market;
+use App\Models\Category;
 
-    expect(response.status).toBe(200)
-    expect(data.success).toBe(true)
-    expect(Array.isArray(data.data)).toBe(true)
-  })
+beforeEach(function () {
+    $this->user = User::factory()->create();
+    $this->category = Category::factory()->create();
+});
 
-  it('validates query parameters', async () => {
-    const request = new NextRequest('http://localhost/api/markets?limit=invalid')
-    const response = await GET(request)
+test('user can view markets list', function () {
+    Market::factory()->count(3)->create();
 
-    expect(response.status).toBe(400)
-  })
+    $response = $this->actingAs($this->user)
+        ->get(route('markets.index'));
 
-  it('handles database errors gracefully', async () => {
-    // Mock database failure
-    const request = new NextRequest('http://localhost/api/markets')
-    // Test error handling
-  })
-})
+    $response
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Markets/Index')
+            ->has('markets.data', 3)
+        );
+});
+
+test('user can create market', function () {
+    $response = $this->actingAs($this->user)
+        ->post(route('markets.store'), [
+            'name' => 'New Market',
+            'description' => 'Market description',
+            'end_date' => now()->addDays(30)->toDateString(),
+            'category_ids' => [$this->category->id],
+        ]);
+
+    $response->assertRedirect();
+
+    $this->assertDatabaseHas('markets', [
+        'name' => 'New Market',
+        'user_id' => $this->user->id,
+    ]);
+});
+
+test('validates required fields', function () {
+    $response = $this->actingAs($this->user)
+        ->post(route('markets.store'), []);
+
+    $response
+        ->assertSessionHasErrors(['name', 'description', 'end_date']);
+});
+
+test('requires authentication', function () {
+    $response = $this->post(route('markets.store'), [
+        'name' => 'New Market',
+    ]);
+
+    $response->assertRedirect(route('login'));
+});
 ```
 
-### E2E Test Pattern (Playwright)
-```typescript
-import { test, expect } from '@playwright/test'
+### API Test Pattern
+```php
+<?php
 
-test('user can search and filter markets', async ({ page }) => {
-  // Navigate to markets page
-  await page.goto('/')
-  await page.click('a[href="/markets"]')
+use App\Models\User;
+use App\Models\Market;
+use Laravel\Sanctum\Sanctum;
 
-  // Verify page loaded
-  await expect(page.locator('h1')).toContainText('Markets')
+beforeEach(function () {
+    $this->user = User::factory()->create();
+});
 
-  // Search for markets
-  await page.fill('input[placeholder="Search markets"]', 'election')
+test('returns markets list', function () {
+    Market::factory()->count(3)->create();
 
-  // Wait for debounce and results
-  await page.waitForTimeout(600)
+    Sanctum::actingAs($this->user);
 
-  // Verify search results displayed
-  const results = page.locator('[data-testid="market-card"]')
-  await expect(results).toHaveCount(5, { timeout: 5000 })
+    $response = $this->getJson(route('api.markets.index'));
 
-  // Verify results contain search term
-  const firstResult = results.first()
-  await expect(firstResult).toContainText('election', { ignoreCase: true })
+    $response
+        ->assertOk()
+        ->assertJsonStructure([
+            'data' => [
+                '*' => ['id', 'name', 'description', 'status', 'created_at'],
+            ],
+            'links',
+            'meta',
+        ])
+        ->assertJsonCount(3, 'data');
+});
 
-  // Filter by status
-  await page.click('button:has-text("Active")')
+test('returns single market', function () {
+    $market = Market::factory()->create(['name' => 'Test Market']);
 
-  // Verify filtered results
-  await expect(results).toHaveCount(3)
-})
+    Sanctum::actingAs($this->user);
 
-test('user can create a new market', async ({ page }) => {
-  // Login first
-  await page.goto('/creator-dashboard')
+    $response = $this->getJson(route('api.markets.show', $market));
 
-  // Fill market creation form
-  await page.fill('input[name="name"]', 'Test Market')
-  await page.fill('textarea[name="description"]', 'Test description')
-  await page.fill('input[name="endDate"]', '2025-12-31')
+    $response
+        ->assertOk()
+        ->assertJsonPath('data.name', 'Test Market');
+});
 
-  // Submit form
-  await page.click('button[type="submit"]')
+test('returns 404 for non-existent market', function () {
+    Sanctum::actingAs($this->user);
 
-  // Verify success message
-  await expect(page.locator('text=Market created successfully')).toBeVisible()
+    $response = $this->getJson(route('api.markets.show', 999));
 
-  // Verify redirect to market page
-  await expect(page).toHaveURL(/\/markets\/test-market/)
-})
+    $response->assertNotFound();
+});
+
+test('requires authentication', function () {
+    $response = $this->getJson(route('api.markets.index'));
+
+    $response->assertUnauthorized();
+});
+```
+
+### Authorization Test Pattern
+```php
+<?php
+
+use App\Models\User;
+use App\Models\Market;
+
+test('owner can update market', function () {
+    $user = User::factory()->create();
+    $market = Market::factory()->create(['user_id' => $user->id]);
+
+    $response = $this->actingAs($user)
+        ->put(route('markets.update', $market), [
+            'name' => 'Updated Name',
+            'description' => $market->description,
+            'end_date' => $market->end_date->toDateString(),
+        ]);
+
+    $response->assertRedirect();
+
+    expect($market->fresh()->name)->toBe('Updated Name');
+});
+
+test('non-owner cannot update market', function () {
+    $owner = User::factory()->create();
+    $otherUser = User::factory()->create();
+    $market = Market::factory()->create(['user_id' => $owner->id]);
+
+    $response = $this->actingAs($otherUser)
+        ->put(route('markets.update', $market), [
+            'name' => 'Updated Name',
+        ]);
+
+    $response->assertForbidden();
+});
+
+test('admin can delete any market', function () {
+    $admin = User::factory()->create(['is_admin' => true]);
+    $market = Market::factory()->create();
+
+    $response = $this->actingAs($admin)
+        ->delete(route('markets.destroy', $market));
+
+    $response->assertRedirect();
+
+    $this->assertDatabaseMissing('markets', ['id' => $market->id]);
+});
+```
+
+### Event Test Pattern
+```php
+<?php
+
+use App\Events\MarketCreated;
+use App\Listeners\HandleMarketCreated;
+use App\Jobs\IndexMarketJob;
+use App\Models\User;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Queue;
+
+test('fires MarketCreated event when market is created', function () {
+    Event::fake([MarketCreated::class]);
+
+    $user = User::factory()->create();
+
+    $this->actingAs($user)
+        ->post(route('markets.store'), [
+            'name' => 'New Market',
+            'description' => 'Description',
+            'end_date' => now()->addDays(30)->toDateString(),
+            'category_ids' => [],
+        ]);
+
+    Event::assertDispatched(MarketCreated::class, function ($event) {
+        return $event->market->name === 'New Market';
+    });
+});
+
+test('listener dispatches index job', function () {
+    Queue::fake();
+
+    $market = Market::factory()->create();
+    $event = new MarketCreated($market);
+
+    app(HandleMarketCreated::class)->handle($event);
+
+    Queue::assertPushed(IndexMarketJob::class, function ($job) use ($market) {
+        return $job->market->id === $market->id;
+    });
+});
+```
+
+### Job Test Pattern
+```php
+<?php
+
+use App\Jobs\IndexMarketJob;
+use App\Models\Market;
+use App\Services\SearchIndexService;
+
+test('indexes market', function () {
+    $market = Market::factory()->create();
+
+    $mockService = $this->mock(SearchIndexService::class);
+    $mockService->shouldReceive('indexMarket')
+        ->once()
+        ->with(\Mockery::on(fn ($m) => $m->id === $market->id));
+
+    $job = new IndexMarketJob($market);
+    $job->handle($mockService);
+});
+
+test('retries on failure', function () {
+    $market = Market::factory()->create();
+    $job = new IndexMarketJob($market);
+
+    expect($job->tries)->toBe(3);
+    expect($job->backoff)->toBe(60);
+});
 ```
 
 ## Test File Organization
 
 ```
-src/
-├── components/
-│   ├── Button/
-│   │   ├── Button.tsx
-│   │   ├── Button.test.tsx          # Unit tests
-│   │   └── Button.stories.tsx       # Storybook
-│   └── MarketCard/
-│       ├── MarketCard.tsx
-│       └── MarketCard.test.tsx
-├── app/
-│   └── api/
-│       └── markets/
-│           ├── route.ts
-│           └── route.test.ts         # Integration tests
-└── e2e/
-    ├── markets.spec.ts               # E2E tests
-    ├── trading.spec.ts
-    └── auth.spec.ts
+tests/
+├── Feature/
+│   ├── Http/
+│   │   ├── Controllers/
+│   │   │   ├── MarketControllerTest.php
+│   │   │   └── Api/
+│   │   │       └── MarketControllerTest.php
+│   │   └── Middleware/
+│   ├── Actions/
+│   │   └── Market/
+│   │       └── CreateMarketActionTest.php
+│   └── Jobs/
+│       └── IndexMarketJobTest.php
+├── Unit/
+│   ├── DTOs/
+│   │   └── CreateMarketDataTest.php
+│   ├── Models/
+│   │   └── MarketTest.php
+│   ├── QueryBuilders/
+│   │   └── MarketQueryBuilderTest.php
+│   └── Services/
+│       └── PaymentServiceTest.php
+└── Pest.php
+```
+
+## Pest Configuration
+
+```php
+<?php
+// tests/Pest.php
+
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+uses(TestCase::class, RefreshDatabase::class)->in('Feature');
+uses(TestCase::class)->in('Unit');
+
+expect()->extend('toBeValidMarket', function () {
+    return $this
+        ->toBeInstanceOf(\App\Models\Market::class)
+        ->name->not->toBeEmpty()
+        ->user_id->toBeInt();
+});
 ```
 
 ## Mocking External Services
 
-### Supabase Mock
-```typescript
-jest.mock('@/lib/supabase', () => ({
-  supabase: {
-    from: jest.fn(() => ({
-      select: jest.fn(() => ({
-        eq: jest.fn(() => Promise.resolve({
-          data: [{ id: 1, name: 'Test Market' }],
-          error: null
-        }))
-      }))
-    }))
-  }
-}))
+### HTTP Client Mock
+```php
+<?php
+
+use Illuminate\Support\Facades\Http;
+
+test('handles external API call', function () {
+    Http::fake([
+        'api.example.com/*' => Http::response([
+            'data' => ['id' => 1, 'name' => 'Test'],
+        ], 200),
+    ]);
+
+    $result = app(ExternalService::class)->fetchData();
+
+    expect($result)->toBe(['id' => 1, 'name' => 'Test']);
+
+    Http::assertSent(function ($request) {
+        return $request->url() === 'https://api.example.com/data';
+    });
+});
+
+test('handles API failure gracefully', function () {
+    Http::fake([
+        'api.example.com/*' => Http::response(null, 500),
+    ]);
+
+    expect(fn () => app(ExternalService::class)->fetchData())
+        ->toThrow(ServiceUnavailableException::class);
+});
 ```
 
-### Redis Mock
-```typescript
-jest.mock('@/lib/redis', () => ({
-  searchMarketsByVector: jest.fn(() => Promise.resolve([
-    { slug: 'test-market', similarity_score: 0.95 }
-  ])),
-  checkRedisHealth: jest.fn(() => Promise.resolve({ connected: true }))
-}))
+### Cache Mock
+```php
+<?php
+
+use Illuminate\Support\Facades\Cache;
+
+test('caches result', function () {
+    Cache::shouldReceive('remember')
+        ->once()
+        ->with('market:1', \Mockery::any(), \Mockery::any())
+        ->andReturn($market = Market::factory()->make());
+
+    $result = app(MarketRepository::class)->findById(1);
+
+    expect($result)->toBe($market);
+});
 ```
 
-### OpenAI Mock
-```typescript
-jest.mock('@/lib/openai', () => ({
-  generateEmbedding: jest.fn(() => Promise.resolve(
-    new Array(1536).fill(0.1) // Mock 1536-dim embedding
-  ))
-}))
+### Mail Mock
+```php
+<?php
+
+use App\Mail\MarketCreatedMail;
+use Illuminate\Support\Facades\Mail;
+
+test('sends email when market is created', function () {
+    Mail::fake();
+
+    $user = User::factory()->create();
+
+    $this->actingAs($user)
+        ->post(route('markets.store'), [
+            'name' => 'New Market',
+            'description' => 'Description',
+            'end_date' => now()->addDays(30)->toDateString(),
+            'category_ids' => [],
+        ]);
+
+    Mail::assertSent(MarketCreatedMail::class, function ($mail) use ($user) {
+        return $mail->hasTo($user->email);
+    });
+});
 ```
 
 ## Test Coverage Verification
 
 ### Run Coverage Report
 ```bash
-npm run test:coverage
+php artisan test --coverage
 ```
 
 ### Coverage Thresholds
-```json
-{
-  "jest": {
-    "coverageThresholds": {
-      "global": {
-        "branches": 80,
-        "functions": 80,
-        "lines": 80,
-        "statements": 80
-      }
-    }
-  }
-}
-```
-
-## Common Testing Mistakes to Avoid
-
-### ❌ WRONG: Testing Implementation Details
-```typescript
-// Don't test internal state
-expect(component.state.count).toBe(5)
-```
-
-### ✅ CORRECT: Test User-Visible Behavior
-```typescript
-// Test what users see
-expect(screen.getByText('Count: 5')).toBeInTheDocument()
-```
-
-### ❌ WRONG: Brittle Selectors
-```typescript
-// Breaks easily
-await page.click('.css-class-xyz')
-```
-
-### ✅ CORRECT: Semantic Selectors
-```typescript
-// Resilient to changes
-await page.click('button:has-text("Submit")')
-await page.click('[data-testid="submit-button"]')
-```
-
-### ❌ WRONG: No Test Isolation
-```typescript
-// Tests depend on each other
-test('creates user', () => { /* ... */ })
-test('updates same user', () => { /* depends on previous test */ })
-```
-
-### ✅ CORRECT: Independent Tests
-```typescript
-// Each test sets up its own data
-test('creates user', () => {
-  const user = createTestUser()
-  // Test logic
-})
-
-test('updates user', () => {
-  const user = createTestUser()
-  // Update logic
-})
-```
-
-## Continuous Testing
-
-### Watch Mode During Development
-```bash
-npm test -- --watch
-# Tests run automatically on file changes
-```
-
-### Pre-Commit Hook
-```bash
-# Runs before every commit
-npm test && npm run lint
+```xml
+<!-- phpunit.xml -->
+<coverage processUncoveredFiles="true">
+    <include>
+        <directory suffix=".php">./app</directory>
+    </include>
+    <report>
+        <html outputDirectory="coverage-report"/>
+    </report>
+</coverage>
 ```
 
 ### CI/CD Integration
 ```yaml
-# GitHub Actions
+# .github/workflows/tests.yml
 - name: Run Tests
-  run: npm test -- --coverage
-- name: Upload Coverage
-  uses: codecov/codecov-action@v3
+  run: php artisan test --coverage --min=80
+
+- name: Run Static Analysis
+  run: ./vendor/bin/phpstan analyse
+```
+
+## Common Testing Mistakes to Avoid
+
+### Wrong: Testing Implementation Details
+```php
+// Don't test internal state
+expect($service->cachedData)->toBe($expectedData);
+```
+
+### Correct: Test Observable Behavior
+```php
+// Test what the user/system sees
+expect($service->getData())->toBe($expectedData);
+```
+
+### Wrong: Brittle Database Assertions
+```php
+// Breaks if column order changes
+$this->assertDatabaseHas('markets', $market->toArray());
+```
+
+### Correct: Specific Assertions
+```php
+// Only assert what matters
+$this->assertDatabaseHas('markets', [
+    'id' => $market->id,
+    'name' => 'Expected Name',
+]);
+```
+
+### Wrong: No Test Isolation
+```php
+// Tests depend on each other
+test('creates user', function () { });
+test('updates same user', function () { }); // depends on previous test
+```
+
+### Correct: Independent Tests
+```php
+// Each test sets up its own data
+test('creates user', function () {
+    $user = User::factory()->create();
+    // Test logic
+});
+
+test('updates user', function () {
+    $user = User::factory()->create();
+    // Update logic
+});
 ```
 
 ## Best Practices
@@ -389,10 +645,10 @@ npm test && npm run lint
 3. **Descriptive Test Names** - Explain what's tested
 4. **Arrange-Act-Assert** - Clear test structure
 5. **Mock External Dependencies** - Isolate unit tests
-6. **Test Edge Cases** - Null, undefined, empty, large
+6. **Test Edge Cases** - Null, empty, boundary values
 7. **Test Error Paths** - Not just happy paths
 8. **Keep Tests Fast** - Unit tests < 50ms each
-9. **Clean Up After Tests** - No side effects
+9. **Use Factories** - Don't hardcode test data
 10. **Review Coverage Reports** - Identify gaps
 
 ## Success Metrics
@@ -401,7 +657,7 @@ npm test && npm run lint
 - All tests passing (green)
 - No skipped or disabled tests
 - Fast test execution (< 30s for unit tests)
-- E2E tests cover critical user flows
+- Feature tests cover critical user flows
 - Tests catch bugs before production
 
 ---

@@ -1,18 +1,28 @@
 ---
 name: frontend-patterns
-description: Frontend development patterns for React, Next.js, state management, performance optimization, and UI best practices.
+description: Frontend development patterns for Inertia.js with React, TypeScript, state management, performance optimization, and UI best practices in Laravel applications.
 ---
 
 # Frontend Development Patterns
 
-Modern frontend patterns for React, Next.js, and performant user interfaces.
+Modern frontend patterns for Laravel with Inertia.js and React.
+
+## Inertia.js Data Flow
+
+```
+Laravel Controller
+    | (Inertia::render with props)
+React Page Component
+    | (props drilling or context)
+Child Components
+```
 
 ## Component Patterns
 
 ### Composition Over Inheritance
 
 ```typescript
-// ✅ GOOD: Component composition
+// Good: Component composition
 interface CardProps {
   children: React.ReactNode
   variant?: 'default' | 'outlined'
@@ -35,6 +45,45 @@ export function CardBody({ children }: { children: React.ReactNode }) {
   <CardHeader>Title</CardHeader>
   <CardBody>Content</CardBody>
 </Card>
+```
+
+### Inertia Page Component
+
+```typescript
+import { Head } from '@inertiajs/react'
+
+interface Market {
+  id: number
+  name: string
+  description: string
+  status: 'active' | 'resolved' | 'closed'
+}
+
+interface Props {
+  markets: Market[]
+  filters: {
+    status: string | null
+    search: string | null
+  }
+}
+
+export default function MarketsIndex({ markets, filters }: Props) {
+  return (
+    <>
+      <Head title="Markets" />
+
+      <div className="container mx-auto py-8">
+        <h1 className="text-2xl font-bold mb-6">Markets</h1>
+
+        <div className="grid gap-4">
+          {markets.map((market) => (
+            <MarketCard key={market.id} market={market} />
+          ))}
+        </div>
+      </div>
+    </>
+  )
+}
 ```
 
 ### Compound Components
@@ -87,38 +136,194 @@ export function Tab({ id, children }: { id: string, children: React.ReactNode })
 </Tabs>
 ```
 
-### Render Props Pattern
+## Inertia.js Patterns
+
+### Form Handling with useForm
 
 ```typescript
-interface DataLoaderProps<T> {
-  url: string
-  children: (data: T | null, loading: boolean, error: Error | null) => React.ReactNode
+import { useForm } from '@inertiajs/react'
+
+interface FormData {
+  name: string
+  description: string
+  end_date: string
+  category_ids: number[]
 }
 
-export function DataLoader<T>({ url, children }: DataLoaderProps<T>) {
-  const [data, setData] = useState<T | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<Error | null>(null)
+export function CreateMarketForm() {
+  const { data, setData, post, processing, errors, reset } = useForm<FormData>({
+    name: '',
+    description: '',
+    end_date: '',
+    category_ids: [],
+  })
 
-  useEffect(() => {
-    fetch(url)
-      .then(res => res.json())
-      .then(setData)
-      .catch(setError)
-      .finally(() => setLoading(false))
-  }, [url])
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    post(route('markets.store'), {
+      onSuccess: () => reset(),
+    })
+  }
 
-  return <>{children(data, loading, error)}</>
+  return (
+    <form onSubmit={handleSubmit}>
+      <div className="mb-4">
+        <label htmlFor="name">Market Name</label>
+        <input
+          id="name"
+          type="text"
+          value={data.name}
+          onChange={(e) => setData('name', e.target.value)}
+          className={errors.name ? 'border-red-500' : ''}
+        />
+        {errors.name && (
+          <p className="text-red-500 text-sm mt-1">{errors.name}</p>
+        )}
+      </div>
+
+      <div className="mb-4">
+        <label htmlFor="description">Description</label>
+        <textarea
+          id="description"
+          value={data.description}
+          onChange={(e) => setData('description', e.target.value)}
+          className={errors.description ? 'border-red-500' : ''}
+        />
+        {errors.description && (
+          <p className="text-red-500 text-sm mt-1">{errors.description}</p>
+        )}
+      </div>
+
+      <button type="submit" disabled={processing}>
+        {processing ? 'Creating...' : 'Create Market'}
+      </button>
+    </form>
+  )
+}
+```
+
+### Navigation with Inertia Link
+
+```typescript
+import { Link, router } from '@inertiajs/react'
+
+// Declarative navigation
+<Link href={route('markets.show', market.id)} className="text-blue-600">
+  {market.name}
+</Link>
+
+// Preserve scroll position
+<Link href={route('markets.index')} preserveScroll>
+  Back to Markets
+</Link>
+
+// Preserve state
+<Link href={route('markets.index', { page: 2 })} preserveState>
+  Page 2
+</Link>
+
+// Programmatic navigation
+function handleClick() {
+  router.visit(route('markets.show', market.id))
 }
 
-// Usage
-<DataLoader<Market[]> url="/api/markets">
-  {(markets, loading, error) => {
-    if (loading) return <Spinner />
-    if (error) return <Error error={error} />
-    return <MarketList markets={markets!} />
-  }}
-</DataLoader>
+// With method
+function handleDelete() {
+  router.delete(route('markets.destroy', market.id), {
+    onBefore: () => confirm('Are you sure?'),
+    onSuccess: () => toast.success('Deleted!'),
+  })
+}
+```
+
+### Shared Data Access
+
+```typescript
+import { usePage } from '@inertiajs/react'
+
+interface SharedData {
+  auth: {
+    user: {
+      id: number
+      name: string
+      email: string
+    } | null
+  }
+  flash: {
+    success?: string
+    error?: string
+  }
+}
+
+export function useAuth() {
+  const { auth } = usePage<SharedData>().props
+  return auth
+}
+
+export function useFlash() {
+  const { flash } = usePage<SharedData>().props
+  return flash
+}
+
+// Usage in component
+function Header() {
+  const { user } = useAuth()
+
+  return (
+    <header>
+      {user ? (
+        <span>Welcome, {user.name}</span>
+      ) : (
+        <Link href={route('login')}>Login</Link>
+      )}
+    </header>
+  )
+}
+```
+
+### Real-time Validation
+
+```typescript
+import { useForm } from '@inertiajs/react'
+import { useCallback } from 'react'
+import debounce from 'lodash/debounce'
+
+export function CreateMarketForm() {
+  const { data, setData, post, processing, errors, clearErrors } = useForm({
+    name: '',
+    description: '',
+  })
+
+  // Debounced server-side validation
+  const validateField = useCallback(
+    debounce((field: string, value: string) => {
+      router.post(route('markets.validate'), {
+        [field]: value,
+      }, {
+        preserveState: true,
+        preserveScroll: true,
+        only: ['errors'],
+      })
+    }, 500),
+    []
+  )
+
+  const handleChange = (field: keyof typeof data, value: string) => {
+    setData(field, value)
+    clearErrors(field)
+    validateField(field, value)
+  }
+
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); post(route('markets.store')) }}>
+      <input
+        value={data.name}
+        onChange={(e) => handleChange('name', e.target.value)}
+      />
+      {errors.name && <span className="error">{errors.name}</span>}
+    </form>
+  )
+}
 ```
 
 ## Custom Hooks Patterns
@@ -130,7 +335,7 @@ export function useToggle(initialValue = false): [boolean, () => void] {
   const [value, setValue] = useState(initialValue)
 
   const toggle = useCallback(() => {
-    setValue(v => !v)
+    setValue((v) => !v)
   }, [])
 
   return [value, toggle]
@@ -138,61 +343,6 @@ export function useToggle(initialValue = false): [boolean, () => void] {
 
 // Usage
 const [isOpen, toggleOpen] = useToggle()
-```
-
-### Async Data Fetching Hook
-
-```typescript
-interface UseQueryOptions<T> {
-  onSuccess?: (data: T) => void
-  onError?: (error: Error) => void
-  enabled?: boolean
-}
-
-export function useQuery<T>(
-  key: string,
-  fetcher: () => Promise<T>,
-  options?: UseQueryOptions<T>
-) {
-  const [data, setData] = useState<T | null>(null)
-  const [error, setError] = useState<Error | null>(null)
-  const [loading, setLoading] = useState(false)
-
-  const refetch = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-
-    try {
-      const result = await fetcher()
-      setData(result)
-      options?.onSuccess?.(result)
-    } catch (err) {
-      const error = err as Error
-      setError(error)
-      options?.onError?.(error)
-    } finally {
-      setLoading(false)
-    }
-  }, [fetcher, options])
-
-  useEffect(() => {
-    if (options?.enabled !== false) {
-      refetch()
-    }
-  }, [key, refetch, options?.enabled])
-
-  return { data, error, loading, refetch }
-}
-
-// Usage
-const { data: markets, loading, error, refetch } = useQuery(
-  'markets',
-  () => fetch('/api/markets').then(r => r.json()),
-  {
-    onSuccess: data => console.log('Fetched', data.length, 'markets'),
-    onError: err => console.error('Failed:', err)
-  }
-)
 ```
 
 ### Debounce Hook
@@ -212,15 +362,62 @@ export function useDebounce<T>(value: T, delay: number): T {
   return debouncedValue
 }
 
-// Usage
-const [searchQuery, setSearchQuery] = useState('')
-const debouncedQuery = useDebounce(searchQuery, 500)
+// Usage with Inertia
+function MarketSearch() {
+  const [search, setSearch] = useState('')
+  const debouncedSearch = useDebounce(search, 500)
 
-useEffect(() => {
-  if (debouncedQuery) {
-    performSearch(debouncedQuery)
-  }
-}, [debouncedQuery])
+  useEffect(() => {
+    if (debouncedSearch) {
+      router.get(route('markets.index'), {
+        search: debouncedSearch,
+      }, {
+        preserveState: true,
+        preserveScroll: true,
+      })
+    }
+  }, [debouncedSearch])
+
+  return (
+    <input
+      type="text"
+      value={search}
+      onChange={(e) => setSearch(e.target.value)}
+      placeholder="Search markets..."
+    />
+  )
+}
+```
+
+### Local Storage Hook
+
+```typescript
+export function useLocalStorage<T>(key: string, initialValue: T) {
+  const [storedValue, setStoredValue] = useState<T>(() => {
+    if (typeof window === 'undefined') {
+      return initialValue
+    }
+    try {
+      const item = window.localStorage.getItem(key)
+      return item ? JSON.parse(item) : initialValue
+    } catch {
+      return initialValue
+    }
+  })
+
+  const setValue = useCallback((value: T | ((val: T) => T)) => {
+    setStoredValue((prev) => {
+      const valueToStore = value instanceof Function ? value(prev) : value
+      window.localStorage.setItem(key, JSON.stringify(valueToStore))
+      return valueToStore
+    })
+  }, [key])
+
+  return [storedValue, setValue] as const
+}
+
+// Usage
+const [theme, setTheme] = useLocalStorage('theme', 'light')
 ```
 
 ## State Management Patterns
@@ -261,7 +458,7 @@ export function MarketProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(reducer, {
     markets: [],
     selectedMarket: null,
-    loading: false
+    loading: false,
   })
 
   return (
@@ -283,17 +480,17 @@ export function useMarkets() {
 ### Memoization
 
 ```typescript
-// ✅ useMemo for expensive computations
+// useMemo for expensive computations
 const sortedMarkets = useMemo(() => {
   return markets.sort((a, b) => b.volume - a.volume)
 }, [markets])
 
-// ✅ useCallback for functions passed to children
+// useCallback for functions passed to children
 const handleSearch = useCallback((query: string) => {
   setSearchQuery(query)
 }, [])
 
-// ✅ React.memo for pure components
+// React.memo for pure components
 export const MarketCard = React.memo<MarketCardProps>(({ market }) => {
   return (
     <div className="market-card">
@@ -309,7 +506,7 @@ export const MarketCard = React.memo<MarketCardProps>(({ market }) => {
 ```typescript
 import { lazy, Suspense } from 'react'
 
-// ✅ Lazy load heavy components
+// Lazy load heavy components
 const HeavyChart = lazy(() => import('./HeavyChart'))
 const ThreeJsBackground = lazy(() => import('./ThreeJsBackground'))
 
@@ -339,19 +536,19 @@ export function VirtualMarketList({ markets }: { markets: Market[] }) {
   const virtualizer = useVirtualizer({
     count: markets.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 100,  // Estimated row height
-    overscan: 5  // Extra items to render
+    estimateSize: () => 100,
+    overscan: 5,
   })
 
   return (
-    <div ref={parentRef} style={{ height: '600px', overflow: 'auto' }}>
+    <div ref={parentRef} className="h-[600px] overflow-auto">
       <div
         style={{
           height: `${virtualizer.getTotalSize()}px`,
-          position: 'relative'
+          position: 'relative',
         }}
       >
-        {virtualizer.getVirtualItems().map(virtualRow => (
+        {virtualizer.getVirtualItems().map((virtualRow) => (
           <div
             key={virtualRow.index}
             style={{
@@ -360,7 +557,7 @@ export function VirtualMarketList({ markets }: { markets: Market[] }) {
               left: 0,
               width: '100%',
               height: `${virtualRow.size}px`,
-              transform: `translateY(${virtualRow.start}px)`
+              transform: `translateY(${virtualRow.start}px)`,
             }}
           >
             <MarketCard market={markets[virtualRow.index]} />
@@ -374,76 +571,74 @@ export function VirtualMarketList({ markets }: { markets: Market[] }) {
 
 ## Form Handling Patterns
 
-### Controlled Form with Validation
+### Controlled Form with Inertia
 
 ```typescript
+import { useForm } from '@inertiajs/react'
+
 interface FormData {
   name: string
   description: string
-  endDate: string
-}
-
-interface FormErrors {
-  name?: string
-  description?: string
-  endDate?: string
+  end_date: string
 }
 
 export function CreateMarketForm() {
-  const [formData, setFormData] = useState<FormData>({
+  const { data, setData, post, processing, errors } = useForm<FormData>({
     name: '',
     description: '',
-    endDate: ''
+    end_date: '',
   })
 
-  const [errors, setErrors] = useState<FormErrors>({})
-
-  const validate = (): boolean => {
-    const newErrors: FormErrors = {}
-
-    if (!formData.name.trim()) {
-      newErrors.name = 'Name is required'
-    } else if (formData.name.length > 200) {
-      newErrors.name = 'Name must be under 200 characters'
-    }
-
-    if (!formData.description.trim()) {
-      newErrors.description = 'Description is required'
-    }
-
-    if (!formData.endDate) {
-      newErrors.endDate = 'End date is required'
-    }
-
-    setErrors(newErrors)
-    return Object.keys(newErrors).length === 0
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-
-    if (!validate()) return
-
-    try {
-      await createMarket(formData)
-      // Success handling
-    } catch (error) {
-      // Error handling
-    }
+    post(route('markets.store'))
   }
 
   return (
     <form onSubmit={handleSubmit}>
-      <input
-        value={formData.name}
-        onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
-        placeholder="Market name"
-      />
-      {errors.name && <span className="error">{errors.name}</span>}
+      <div className="mb-4">
+        <label htmlFor="name" className="block text-sm font-medium">
+          Market Name
+        </label>
+        <input
+          id="name"
+          type="text"
+          value={data.name}
+          onChange={(e) => setData('name', e.target.value)}
+          className={`mt-1 block w-full rounded-md ${
+            errors.name ? 'border-red-500' : 'border-gray-300'
+          }`}
+        />
+        {errors.name && (
+          <p className="mt-1 text-sm text-red-500">{errors.name}</p>
+        )}
+      </div>
 
-      {/* Other fields */}
+      <div className="mb-4">
+        <label htmlFor="description" className="block text-sm font-medium">
+          Description
+        </label>
+        <textarea
+          id="description"
+          value={data.description}
+          onChange={(e) => setData('description', e.target.value)}
+          rows={4}
+          className={`mt-1 block w-full rounded-md ${
+            errors.description ? 'border-red-500' : 'border-gray-300'
+          }`}
+        />
+        {errors.description && (
+          <p className="mt-1 text-sm text-red-500">{errors.description}</p>
+        )}
+      </div>
 
-      <button type="submit">Create Market</button>
+      <button
+        type="submit"
+        disabled={processing}
+        className="px-4 py-2 bg-blue-600 text-white rounded-md disabled:opacity-50"
+      >
+        {processing ? 'Creating...' : 'Create Market'}
+      </button>
     </form>
   )
 }
@@ -463,7 +658,7 @@ export class ErrorBoundary extends React.Component<
 > {
   state: ErrorBoundaryState = {
     hasError: false,
-    error: null
+    error: null,
   }
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
@@ -477,10 +672,13 @@ export class ErrorBoundary extends React.Component<
   render() {
     if (this.state.hasError) {
       return (
-        <div className="error-fallback">
-          <h2>Something went wrong</h2>
-          <p>{this.state.error?.message}</p>
-          <button onClick={() => this.setState({ hasError: false })}>
+        <div className="error-fallback p-8 text-center">
+          <h2 className="text-xl font-bold text-red-600">Something went wrong</h2>
+          <p className="mt-2 text-gray-600">{this.state.error?.message}</p>
+          <button
+            onClick={() => this.setState({ hasError: false })}
+            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded"
+          >
             Try again
           </button>
         </div>
@@ -497,60 +695,6 @@ export class ErrorBoundary extends React.Component<
 </ErrorBoundary>
 ```
 
-## Animation Patterns
-
-### Framer Motion Animations
-
-```typescript
-import { motion, AnimatePresence } from 'framer-motion'
-
-// ✅ List animations
-export function AnimatedMarketList({ markets }: { markets: Market[] }) {
-  return (
-    <AnimatePresence>
-      {markets.map(market => (
-        <motion.div
-          key={market.id}
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -20 }}
-          transition={{ duration: 0.3 }}
-        >
-          <MarketCard market={market} />
-        </motion.div>
-      ))}
-    </AnimatePresence>
-  )
-}
-
-// ✅ Modal animations
-export function Modal({ isOpen, onClose, children }: ModalProps) {
-  return (
-    <AnimatePresence>
-      {isOpen && (
-        <>
-          <motion.div
-            className="modal-overlay"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-          />
-          <motion.div
-            className="modal-content"
-            initial={{ opacity: 0, scale: 0.9, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: 20 }}
-          >
-            {children}
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
-  )
-}
-```
-
 ## Accessibility Patterns
 
 ### Keyboard Navigation
@@ -564,11 +708,11 @@ export function Dropdown({ options, onSelect }: DropdownProps) {
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault()
-        setActiveIndex(i => Math.min(i + 1, options.length - 1))
+        setActiveIndex((i) => Math.min(i + 1, options.length - 1))
         break
       case 'ArrowUp':
         e.preventDefault()
-        setActiveIndex(i => Math.max(i - 1, 0))
+        setActiveIndex((i) => Math.max(i - 1, 0))
         break
       case 'Enter':
         e.preventDefault()
@@ -603,29 +747,96 @@ export function Modal({ isOpen, onClose, children }: ModalProps) {
 
   useEffect(() => {
     if (isOpen) {
-      // Save currently focused element
       previousFocusRef.current = document.activeElement as HTMLElement
-
-      // Focus modal
       modalRef.current?.focus()
     } else {
-      // Restore focus when closing
       previousFocusRef.current?.focus()
     }
   }, [isOpen])
 
-  return isOpen ? (
+  if (!isOpen) return null
+
+  return (
     <div
       ref={modalRef}
       role="dialog"
       aria-modal="true"
       tabIndex={-1}
-      onKeyDown={e => e.key === 'Escape' && onClose()}
+      onKeyDown={(e) => e.key === 'Escape' && onClose()}
+      className="fixed inset-0 z-50 flex items-center justify-center"
     >
-      {children}
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative bg-white rounded-lg p-6 max-w-md w-full">
+        {children}
+      </div>
     </div>
-  ) : null
+  )
 }
 ```
 
-**Remember**: Modern frontend patterns enable maintainable, performant user interfaces. Choose patterns that fit your project complexity.
+## File Organization
+
+### Component Structure
+
+```
+resources/js/
+├── Components/        # Reusable React components
+│   ├── UI/           # Base UI components (Button, Input, etc.)
+│   ├── Forms/        # Form components
+│   └── Layouts/      # Layout components
+├── Hooks/            # Custom React hooks
+├── Layouts/          # Page layouts
+├── Pages/            # Inertia pages (match routes)
+│   ├── Markets/
+│   │   ├── Index.tsx
+│   │   ├── Show.tsx
+│   │   └── Create.tsx
+│   └── Auth/
+│       ├── Login.tsx
+│       └── Register.tsx
+├── Types/            # TypeScript types
+│   ├── index.d.ts
+│   └── models.ts
+└── Utils/            # Utility functions
+```
+
+### Type Definitions
+
+```typescript
+// resources/js/Types/models.ts
+export interface User {
+  id: number
+  name: string
+  email: string
+  created_at: string
+}
+
+export interface Market {
+  id: number
+  name: string
+  description: string
+  status: 'active' | 'resolved' | 'closed'
+  end_date: string
+  user?: User
+  orders_count?: number
+}
+
+// resources/js/Types/index.d.ts
+import { PageProps as InertiaPageProps } from '@inertiajs/core'
+
+export interface PageProps extends InertiaPageProps {
+  auth: {
+    user: User | null
+  }
+  flash: {
+    success?: string
+    error?: string
+  }
+}
+
+declare module '@inertiajs/react' {
+  export function usePage<T extends PageProps>(): { props: T }
+}
+```
+
+**Remember**: Modern frontend patterns enable maintainable, performant user interfaces. Use Inertia.js conventions for seamless Laravel integration.

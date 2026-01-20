@@ -1,582 +1,791 @@
 ---
 name: backend-patterns
-description: Backend architecture patterns, API design, database optimization, and server-side best practices for Node.js, Express, and Next.js API routes.
+description: Backend architecture patterns, API design, database optimization, and server-side best practices for Laravel 12.x with PHP 8.2+.
 ---
 
 # Backend Development Patterns
 
-Backend architecture patterns and best practices for scalable server-side applications.
+Backend architecture patterns and best practices for scalable Laravel applications.
+
+## Layered Architecture
+
+```
+HTTP Request
+    |
+Controller (thin, validates input via Form Request)
+    |
+Action/Service (business logic)
+    |
+Model (Eloquent, data access)
+    |
+Database
+```
 
 ## API Design Patterns
 
 ### RESTful API Structure
 
-```typescript
-// ✅ Resource-based URLs
-GET    /api/markets                 # List resources
-GET    /api/markets/:id             # Get single resource
-POST   /api/markets                 # Create resource
-PUT    /api/markets/:id             # Replace resource
-PATCH  /api/markets/:id             # Update resource
-DELETE /api/markets/:id             # Delete resource
+```php
+// routes/api.php
+Route::apiResource('markets', MarketController::class);
 
-// ✅ Query parameters for filtering, sorting, pagination
-GET /api/markets?status=active&sort=volume&limit=20&offset=0
+// Generated routes:
+// GET    /api/markets              # index
+// GET    /api/markets/{market}     # show
+// POST   /api/markets              # store
+// PUT    /api/markets/{market}     # update
+// DELETE /api/markets/{market}     # destroy
+
+// Query parameters for filtering, sorting, pagination
+// GET /api/markets?status=active&sort=-volume&per_page=20
 ```
 
-### Repository Pattern
+### Action Pattern (Recommended)
 
-```typescript
-// Abstract data access logic
-interface MarketRepository {
-  findAll(filters?: MarketFilters): Promise<Market[]>
-  findById(id: string): Promise<Market | null>
-  create(data: CreateMarketDto): Promise<Market>
-  update(id: string, data: UpdateMarketDto): Promise<Market>
-  delete(id: string): Promise<void>
-}
+```php
+<?php
 
-class SupabaseMarketRepository implements MarketRepository {
-  async findAll(filters?: MarketFilters): Promise<Market[]> {
-    let query = supabase.from('markets').select('*')
+declare(strict_types=1);
 
-    if (filters?.status) {
-      query = query.eq('status', filters.status)
+namespace App\Actions\Market;
+
+use App\DTOs\CreateMarketData;
+use App\Models\Market;
+use Illuminate\Support\Facades\DB;
+
+final class CreateMarketAction
+{
+    public function execute(CreateMarketData $data): Market
+    {
+        return DB::transaction(function () use ($data) {
+            $market = Market::create([
+                'user_id' => $data->userId,
+                'name' => $data->name,
+                'description' => $data->description,
+                'end_date' => $data->endDate,
+            ]);
+
+            $market->categories()->attach($data->categoryIds);
+
+            return $market->load('categories');
+        });
     }
-
-    if (filters?.limit) {
-      query = query.limit(filters.limit)
-    }
-
-    const { data, error } = await query
-
-    if (error) throw new Error(error.message)
-    return data
-  }
-
-  // Other methods...
-}
-```
-
-### Service Layer Pattern
-
-```typescript
-// Business logic separated from data access
-class MarketService {
-  constructor(private marketRepo: MarketRepository) {}
-
-  async searchMarkets(query: string, limit: number = 10): Promise<Market[]> {
-    // Business logic
-    const embedding = await generateEmbedding(query)
-    const results = await this.vectorSearch(embedding, limit)
-
-    // Fetch full data
-    const markets = await this.marketRepo.findByIds(results.map(r => r.id))
-
-    // Sort by similarity
-    return markets.sort((a, b) => {
-      const scoreA = results.find(r => r.id === a.id)?.score || 0
-      const scoreB = results.find(r => r.id === b.id)?.score || 0
-      return scoreA - scoreB
-    })
-  }
-
-  private async vectorSearch(embedding: number[], limit: number) {
-    // Vector search implementation
-  }
 }
 ```
 
-### Middleware Pattern
+### DTO Pattern
 
-```typescript
-// Request/response processing pipeline
-export function withAuth(handler: NextApiHandler): NextApiHandler {
-  return async (req, res) => {
-    const token = req.headers.authorization?.replace('Bearer ', '')
+```php
+<?php
 
-    if (!token) {
-      return res.status(401).json({ error: 'Unauthorized' })
+declare(strict_types=1);
+
+namespace App\DTOs;
+
+use App\Http\Requests\StoreMarketRequest;
+use Carbon\Carbon;
+
+final readonly class CreateMarketData
+{
+    public function __construct(
+        public int $userId,
+        public string $name,
+        public string $description,
+        public Carbon $endDate,
+        public array $categoryIds = [],
+    ) {}
+
+    public static function fromRequest(StoreMarketRequest $request): self
+    {
+        return new self(
+            userId: $request->user()->id,
+            name: $request->validated('name'),
+            description: $request->validated('description'),
+            endDate: Carbon::parse($request->validated('end_date')),
+            categoryIds: $request->validated('category_ids', []),
+        );
     }
-
-    try {
-      const user = await verifyToken(token)
-      req.user = user
-      return handler(req, res)
-    } catch (error) {
-      return res.status(401).json({ error: 'Invalid token' })
-    }
-  }
 }
+```
 
-// Usage
-export default withAuth(async (req, res) => {
-  // Handler has access to req.user
-})
+### Service Pattern
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services;
+
+use App\Models\Market;
+use App\Models\Order;
+use App\Models\Transaction;
+use Illuminate\Support\Facades\DB;
+
+final class PaymentService
+{
+    public function __construct(
+        private readonly StripeClient $stripe,
+    ) {}
+
+    public function charge(Order $order, string $paymentMethodId): Transaction
+    {
+        return DB::transaction(function () use ($order, $paymentMethodId) {
+            $charge = $this->stripe->charges->create([
+                'amount' => $order->total_cents,
+                'currency' => 'jpy',
+                'payment_method' => $paymentMethodId,
+            ]);
+
+            return Transaction::create([
+                'order_id' => $order->id,
+                'stripe_charge_id' => $charge->id,
+                'amount' => $order->total_cents,
+                'status' => 'completed',
+            ]);
+        });
+    }
+}
+```
+
+### Thin Controller Pattern
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Http\Controllers\Api;
+
+use App\Actions\Market\CreateMarketAction;
+use App\DTOs\CreateMarketData;
+use App\Http\Controllers\Controller;
+use App\Http\Requests\StoreMarketRequest;
+use App\Http\Resources\MarketResource;
+use App\Models\Market;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+
+final class MarketController extends Controller
+{
+    public function index(): AnonymousResourceCollection
+    {
+        $markets = Market::query()
+            ->with(['user', 'categories'])
+            ->latest()
+            ->paginate();
+
+        return MarketResource::collection($markets);
+    }
+
+    public function store(
+        StoreMarketRequest $request,
+        CreateMarketAction $action
+    ): MarketResource {
+        $market = $action->execute(
+            CreateMarketData::fromRequest($request)
+        );
+
+        return new MarketResource($market);
+    }
+
+    public function show(Market $market): MarketResource
+    {
+        return new MarketResource(
+            $market->load(['user', 'categories', 'orders'])
+        );
+    }
+}
+```
+
+## Form Request Validation
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Http\Requests;
+
+use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
+
+final class StoreMarketRequest extends FormRequest
+{
+    public function authorize(): bool
+    {
+        return true;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function rules(): array
+    {
+        return [
+            'name' => ['required', 'string', 'min:1', 'max:200'],
+            'description' => ['required', 'string', 'min:1', 'max:2000'],
+            'end_date' => ['required', 'date', 'after:today'],
+            'category_ids' => ['required', 'array', 'min:1'],
+            'category_ids.*' => ['required', 'integer', Rule::exists('categories', 'id')],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'name.required' => 'Market name is required.',
+            'end_date.after' => 'End date must be in the future.',
+        ];
+    }
+}
+```
+
+## API Resources
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Http\Resources;
+
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\JsonResource;
+
+/**
+ * @mixin \App\Models\Market
+ */
+final class MarketResource extends JsonResource
+{
+    /**
+     * @return array<string, mixed>
+     */
+    public function toArray(Request $request): array
+    {
+        return [
+            'id' => $this->id,
+            'name' => $this->name,
+            'description' => $this->description,
+            'status' => $this->status,
+            'end_date' => $this->end_date->toIso8601String(),
+            'created_at' => $this->created_at->toIso8601String(),
+            'user' => new UserResource($this->whenLoaded('user')),
+            'categories' => CategoryResource::collection($this->whenLoaded('categories')),
+        ];
+    }
+}
 ```
 
 ## Database Patterns
 
 ### Query Optimization
 
-```typescript
-// ✅ GOOD: Select only needed columns
-const { data } = await supabase
-  .from('markets')
-  .select('id, name, status, volume')
-  .eq('status', 'active')
-  .order('volume', { ascending: false })
-  .limit(10)
+```php
+// Select only needed columns
+$markets = Market::query()
+    ->select(['id', 'name', 'status', 'volume'])
+    ->where('status', 'active')
+    ->orderByDesc('volume')
+    ->limit(10)
+    ->get();
 
-// ❌ BAD: Select everything
-const { data } = await supabase
-  .from('markets')
-  .select('*')
+// Bad: Select everything
+$markets = Market::all();
 ```
 
 ### N+1 Query Prevention
 
-```typescript
-// ❌ BAD: N+1 query problem
-const markets = await getMarkets()
-for (const market of markets) {
-  market.creator = await getUser(market.creator_id)  // N queries
+```php
+// Bad: N+1 query problem
+$markets = Market::all();
+foreach ($markets as $market) {
+    echo $market->user->name; // N queries
 }
 
-// ✅ GOOD: Batch fetch
-const markets = await getMarkets()
-const creatorIds = markets.map(m => m.creator_id)
-const creators = await getUsers(creatorIds)  // 1 query
-const creatorMap = new Map(creators.map(c => [c.id, c]))
+// Good: Eager loading
+$markets = Market::with('user')->get();
+foreach ($markets as $market) {
+    echo $market->user->name; // Already loaded
+}
 
-markets.forEach(market => {
-  market.creator = creatorMap.get(market.creator_id)
-})
+// Good: Conditional eager loading
+$markets = Market::query()
+    ->with(['user', 'categories'])
+    ->withCount('orders')
+    ->when($request->has('include_stats'), function ($query) {
+        $query->withSum('orders', 'amount');
+    })
+    ->get();
+```
+
+### Custom Query Builder
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\QueryBuilders;
+
+use App\Enums\MarketStatus;
+use Illuminate\Database\Eloquent\Builder;
+
+/**
+ * @extends Builder<\App\Models\Market>
+ */
+final class MarketQueryBuilder extends Builder
+{
+    public function active(): self
+    {
+        return $this->where('status', MarketStatus::Active);
+    }
+
+    public function forUser(int $userId): self
+    {
+        return $this->where('user_id', $userId);
+    }
+
+    public function endingSoon(int $days = 7): self
+    {
+        return $this->whereBetween('end_date', [
+            now(),
+            now()->addDays($days),
+        ]);
+    }
+
+    public function withHighVolume(int $minVolume = 1000): self
+    {
+        return $this->where('volume', '>=', $minVolume);
+    }
+}
+
+// Usage in Model
+final class Market extends Model
+{
+    public function newEloquentBuilder($query): MarketQueryBuilder
+    {
+        return new MarketQueryBuilder($query);
+    }
+}
+
+// Usage
+$markets = Market::query()
+    ->active()
+    ->endingSoon()
+    ->withHighVolume()
+    ->get();
 ```
 
 ### Transaction Pattern
 
-```typescript
-async function createMarketWithPosition(
-  marketData: CreateMarketDto,
-  positionData: CreatePositionDto
-) {
-  // Use Supabase transaction
-  const { data, error } = await supabase.rpc('create_market_with_position', {
-    market_data: marketData,
-    position_data: positionData
-  })
+```php
+use Illuminate\Support\Facades\DB;
 
-  if (error) throw new Error('Transaction failed')
-  return data
+public function createMarketWithPosition(
+    CreateMarketData $marketData,
+    CreatePositionData $positionData
+): Market {
+    return DB::transaction(function () use ($marketData, $positionData) {
+        $market = Market::create($marketData->toArray());
+
+        $market->positions()->create([
+            'user_id' => $positionData->userId,
+            'amount' => $positionData->amount,
+            'direction' => $positionData->direction,
+        ]);
+
+        return $market->load('positions');
+    });
 }
-
-// SQL function in Supabase
-CREATE OR REPLACE FUNCTION create_market_with_position(
-  market_data jsonb,
-  position_data jsonb
-)
-RETURNS jsonb
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  -- Start transaction automatically
-  INSERT INTO markets VALUES (market_data);
-  INSERT INTO positions VALUES (position_data);
-  RETURN jsonb_build_object('success', true);
-EXCEPTION
-  WHEN OTHERS THEN
-    -- Rollback happens automatically
-    RETURN jsonb_build_object('success', false, 'error', SQLERRM);
-END;
-$$;
 ```
 
 ## Caching Strategies
 
-### Redis Caching Layer
+### Redis Caching
 
-```typescript
-class CachedMarketRepository implements MarketRepository {
-  constructor(
-    private baseRepo: MarketRepository,
-    private redis: RedisClient
-  ) {}
+```php
+use Illuminate\Support\Facades\Cache;
 
-  async findById(id: string): Promise<Market | null> {
-    // Check cache first
-    const cached = await this.redis.get(`market:${id}`)
-
-    if (cached) {
-      return JSON.parse(cached)
+final class MarketRepository
+{
+    public function findById(int $id): ?Market
+    {
+        return Cache::remember(
+            key: "market:{$id}",
+            ttl: now()->addMinutes(5),
+            callback: fn () => Market::find($id)
+        );
     }
 
-    // Cache miss - fetch from database
-    const market = await this.baseRepo.findById(id)
-
-    if (market) {
-      // Cache for 5 minutes
-      await this.redis.setex(`market:${id}`, 300, JSON.stringify(market))
+    public function getActiveMarkets(): Collection
+    {
+        return Cache::tags(['markets'])->remember(
+            key: 'markets:active',
+            ttl: now()->addMinutes(10),
+            callback: fn () => Market::active()->get()
+        );
     }
 
-    return market
-  }
-
-  async invalidateCache(id: string): Promise<void> {
-    await this.redis.del(`market:${id}`)
-  }
+    public function invalidateCache(int $id): void
+    {
+        Cache::forget("market:{$id}");
+        Cache::tags(['markets'])->flush();
+    }
 }
 ```
 
-### Cache-Aside Pattern
+### Model Caching with Observer
 
-```typescript
-async function getMarketWithCache(id: string): Promise<Market> {
-  const cacheKey = `market:${id}`
+```php
+<?php
 
-  // Try cache
-  const cached = await redis.get(cacheKey)
-  if (cached) return JSON.parse(cached)
+declare(strict_types=1);
 
-  // Cache miss - fetch from DB
-  const market = await db.markets.findUnique({ where: { id } })
+namespace App\Observers;
 
-  if (!market) throw new Error('Market not found')
+use App\Models\Market;
+use Illuminate\Support\Facades\Cache;
 
-  // Update cache
-  await redis.setex(cacheKey, 300, JSON.stringify(market))
+final class MarketObserver
+{
+    public function saved(Market $market): void
+    {
+        Cache::forget("market:{$market->id}");
+        Cache::tags(['markets'])->flush();
+    }
 
-  return market
+    public function deleted(Market $market): void
+    {
+        Cache::forget("market:{$market->id}");
+        Cache::tags(['markets'])->flush();
+    }
 }
 ```
 
 ## Error Handling Patterns
 
-### Centralized Error Handler
+### Custom Exception
 
-```typescript
-class ApiError extends Error {
-  constructor(
-    public statusCode: number,
-    public message: string,
-    public isOperational = true
-  ) {
-    super(message)
-    Object.setPrototypeOf(this, ApiError.prototype)
-  }
-}
+```php
+<?php
 
-export function errorHandler(error: unknown, req: Request): Response {
-  if (error instanceof ApiError) {
-    return NextResponse.json({
-      success: false,
-      error: error.message
-    }, { status: error.statusCode })
-  }
+declare(strict_types=1);
 
-  if (error instanceof z.ZodError) {
-    return NextResponse.json({
-      success: false,
-      error: 'Validation failed',
-      details: error.errors
-    }, { status: 400 })
-  }
+namespace App\Exceptions;
 
-  // Log unexpected errors
-  console.error('Unexpected error:', error)
+use Exception;
+use Illuminate\Http\JsonResponse;
 
-  return NextResponse.json({
-    success: false,
-    error: 'Internal server error'
-  }, { status: 500 })
-}
+final class MarketNotFoundException extends Exception
+{
+    public function __construct(
+        public readonly int $marketId,
+        string $message = 'Market not found',
+    ) {
+        parent::__construct($message);
+    }
 
-// Usage
-export async function GET(request: Request) {
-  try {
-    const data = await fetchData()
-    return NextResponse.json({ success: true, data })
-  } catch (error) {
-    return errorHandler(error, request)
-  }
+    public function render(): JsonResponse
+    {
+        return response()->json([
+            'message' => $this->message,
+            'market_id' => $this->marketId,
+        ], 404);
+    }
 }
 ```
 
-### Retry with Exponential Backoff
+### Exception Handler
 
-```typescript
-async function fetchWithRetry<T>(
-  fn: () => Promise<T>,
-  maxRetries = 3
-): Promise<T> {
-  let lastError: Error
+```php
+// bootstrap/app.php
+use App\Exceptions\MarketNotFoundException;
+use Illuminate\Foundation\Application;
+use Illuminate\Foundation\Configuration\Exceptions;
+use Illuminate\Validation\ValidationException;
 
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      return await fn()
-    } catch (error) {
-      lastError = error as Error
+return Application::configure(basePath: dirname(__DIR__))
+    ->withExceptions(function (Exceptions $exceptions) {
+        $exceptions->render(function (ValidationException $e) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
+        });
 
-      if (i < maxRetries - 1) {
-        // Exponential backoff: 1s, 2s, 4s
-        const delay = Math.pow(2, i) * 1000
-        await new Promise(resolve => setTimeout(resolve, delay))
-      }
-    }
-  }
-
-  throw lastError!
-}
-
-// Usage
-const data = await fetchWithRetry(() => fetchFromAPI())
+        $exceptions->render(function (MarketNotFoundException $e) {
+            return $e->render();
+        });
+    })
+    ->create();
 ```
 
 ## Authentication & Authorization
 
-### JWT Token Validation
+### Policy-Based Authorization
 
-```typescript
-import jwt from 'jsonwebtoken'
+```php
+<?php
 
-interface JWTPayload {
-  userId: string
-  email: string
-  role: 'admin' | 'user'
+declare(strict_types=1);
+
+namespace App\Policies;
+
+use App\Models\Market;
+use App\Models\User;
+
+final class MarketPolicy
+{
+    public function view(User $user, Market $market): bool
+    {
+        return true;
+    }
+
+    public function update(User $user, Market $market): bool
+    {
+        return $user->id === $market->user_id;
+    }
+
+    public function delete(User $user, Market $market): bool
+    {
+        return $user->id === $market->user_id || $user->is_admin;
+    }
 }
 
-export function verifyToken(token: string): JWTPayload {
-  try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET!) as JWTPayload
-    return payload
-  } catch (error) {
-    throw new ApiError(401, 'Invalid token')
-  }
-}
+// Usage in Controller
+public function update(UpdateMarketRequest $request, Market $market): MarketResource
+{
+    $this->authorize('update', $market);
 
-export async function requireAuth(request: Request) {
-  const token = request.headers.get('authorization')?.replace('Bearer ', '')
+    $market->update($request->validated());
 
-  if (!token) {
-    throw new ApiError(401, 'Missing authorization token')
-  }
-
-  return verifyToken(token)
-}
-
-// Usage in API route
-export async function GET(request: Request) {
-  const user = await requireAuth(request)
-
-  const data = await getDataForUser(user.userId)
-
-  return NextResponse.json({ success: true, data })
+    return new MarketResource($market);
 }
 ```
 
-### Role-Based Access Control
+### Gate-Based Authorization
 
-```typescript
-type Permission = 'read' | 'write' | 'delete' | 'admin'
+```php
+// app/Providers/AppServiceProvider.php
+use Illuminate\Support\Facades\Gate;
 
-interface User {
-  id: string
-  role: 'admin' | 'moderator' | 'user'
-}
+public function boot(): void
+{
+    Gate::define('access-admin', function (User $user): bool {
+        return $user->is_admin;
+    });
 
-const rolePermissions: Record<User['role'], Permission[]> = {
-  admin: ['read', 'write', 'delete', 'admin'],
-  moderator: ['read', 'write', 'delete'],
-  user: ['read', 'write']
-}
-
-export function hasPermission(user: User, permission: Permission): boolean {
-  return rolePermissions[user.role].includes(permission)
-}
-
-export function requirePermission(permission: Permission) {
-  return async (request: Request) => {
-    const user = await requireAuth(request)
-
-    if (!hasPermission(user, permission)) {
-      throw new ApiError(403, 'Insufficient permissions')
-    }
-
-    return user
-  }
+    Gate::define('create-market', function (User $user): bool {
+        return $user->hasVerifiedEmail() && $user->markets()->count() < 10;
+    });
 }
 
 // Usage
-export const DELETE = requirePermission('delete')(async (request: Request) => {
-  // Handler with permission check
-})
+if (Gate::allows('create-market')) {
+    // Create market
+}
 ```
 
 ## Rate Limiting
 
-### Simple In-Memory Rate Limiter
+```php
+// bootstrap/app.php
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Support\Facades\RateLimiter;
 
-```typescript
-class RateLimiter {
-  private requests = new Map<string, number[]>()
+RateLimiter::for('api', function (Request $request) {
+    return Limit::perMinute(60)->by($request->user()?->id ?: $request->ip());
+});
 
-  async checkLimit(
-    identifier: string,
-    maxRequests: number,
-    windowMs: number
-  ): Promise<boolean> {
-    const now = Date.now()
-    const requests = this.requests.get(identifier) || []
+RateLimiter::for('search', function (Request $request) {
+    return Limit::perMinute(10)->by($request->user()?->id ?: $request->ip());
+});
 
-    // Remove old requests outside window
-    const recentRequests = requests.filter(time => now - time < windowMs)
-
-    if (recentRequests.length >= maxRequests) {
-      return false  // Rate limit exceeded
-    }
-
-    // Add current request
-    recentRequests.push(now)
-    this.requests.set(identifier, recentRequests)
-
-    return true
-  }
-}
-
-const limiter = new RateLimiter()
-
-export async function GET(request: Request) {
-  const ip = request.headers.get('x-forwarded-for') || 'unknown'
-
-  const allowed = await limiter.checkLimit(ip, 100, 60000)  // 100 req/min
-
-  if (!allowed) {
-    return NextResponse.json({
-      error: 'Rate limit exceeded'
-    }, { status: 429 })
-  }
-
-  // Continue with request
-}
+// Usage in routes
+Route::middleware('throttle:search')->group(function () {
+    Route::get('/search', [SearchController::class, 'index']);
+});
 ```
 
-## Background Jobs & Queues
+## Queue Jobs
 
-### Simple Queue Pattern
+### Job Definition
 
-```typescript
-class JobQueue<T> {
-  private queue: T[] = []
-  private processing = false
+```php
+<?php
 
-  async add(job: T): Promise<void> {
-    this.queue.push(job)
+declare(strict_types=1);
 
-    if (!this.processing) {
-      this.process()
+namespace App\Jobs;
+
+use App\Models\Market;
+use App\Services\SearchIndexService;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
+
+final class IndexMarketJob implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    public int $tries = 3;
+    public int $backoff = 60;
+
+    public function __construct(
+        public readonly Market $market,
+    ) {}
+
+    public function handle(SearchIndexService $indexService): void
+    {
+        $indexService->indexMarket($this->market);
     }
-  }
 
-  private async process(): Promise<void> {
-    this.processing = true
-
-    while (this.queue.length > 0) {
-      const job = this.queue.shift()!
-
-      try {
-        await this.execute(job)
-      } catch (error) {
-        console.error('Job failed:', error)
-      }
+    public function failed(\Throwable $exception): void
+    {
+        report($exception);
     }
-
-    this.processing = false
-  }
-
-  private async execute(job: T): Promise<void> {
-    // Job execution logic
-  }
 }
 
-// Usage for indexing markets
-interface IndexJob {
-  marketId: string
-}
+// Dispatch
+IndexMarketJob::dispatch($market);
 
-const indexQueue = new JobQueue<IndexJob>()
+// Dispatch with delay
+IndexMarketJob::dispatch($market)->delay(now()->addMinutes(5));
 
-export async function POST(request: Request) {
-  const { marketId } = await request.json()
+// Dispatch on specific queue
+IndexMarketJob::dispatch($market)->onQueue('indexing');
+```
 
-  // Add to queue instead of blocking
-  await indexQueue.add({ marketId })
+### Job Batching
 
-  return NextResponse.json({ success: true, message: 'Job queued' })
-}
+```php
+use Illuminate\Bus\Batch;
+use Illuminate\Support\Facades\Bus;
+
+$markets = Market::where('needs_reindex', true)->get();
+
+$batch = Bus::batch(
+    $markets->map(fn ($market) => new IndexMarketJob($market))
+)->then(function (Batch $batch) {
+    Log::info('All markets indexed successfully');
+})->catch(function (Batch $batch, \Throwable $e) {
+    Log::error('Batch indexing failed', ['error' => $e->getMessage()]);
+})->finally(function (Batch $batch) {
+    Market::whereIn('id', $batch->processedJobs())
+        ->update(['needs_reindex' => false]);
+})->dispatch();
 ```
 
 ## Logging & Monitoring
 
 ### Structured Logging
 
-```typescript
-interface LogContext {
-  userId?: string
-  requestId?: string
-  method?: string
-  path?: string
-  [key: string]: unknown
-}
+```php
+use Illuminate\Support\Facades\Log;
 
-class Logger {
-  log(level: 'info' | 'warn' | 'error', message: string, context?: LogContext) {
-    const entry = {
-      timestamp: new Date().toISOString(),
-      level,
-      message,
-      ...context
-    }
+Log::info('Market created', [
+    'market_id' => $market->id,
+    'user_id' => $market->user_id,
+    'name' => $market->name,
+]);
 
-    console.log(JSON.stringify(entry))
-  }
+Log::warning('Rate limit approaching', [
+    'user_id' => $user->id,
+    'requests_remaining' => $remaining,
+]);
 
-  info(message: string, context?: LogContext) {
-    this.log('info', message, context)
-  }
+Log::error('Payment failed', [
+    'order_id' => $order->id,
+    'error' => $exception->getMessage(),
+    'trace' => $exception->getTraceAsString(),
+]);
+```
 
-  warn(message: string, context?: LogContext) {
-    this.log('warn', message, context)
-  }
+### Custom Log Channel
 
-  error(message: string, error: Error, context?: LogContext) {
-    this.log('error', message, {
-      ...context,
-      error: error.message,
-      stack: error.stack
-    })
-  }
-}
-
-const logger = new Logger()
+```php
+// config/logging.php
+'channels' => [
+    'payments' => [
+        'driver' => 'daily',
+        'path' => storage_path('logs/payments.log'),
+        'level' => 'info',
+        'days' => 30,
+    ],
+],
 
 // Usage
-export async function GET(request: Request) {
-  const requestId = crypto.randomUUID()
+Log::channel('payments')->info('Payment processed', [
+    'order_id' => $order->id,
+    'amount' => $order->total,
+]);
+```
 
-  logger.info('Fetching markets', {
-    requestId,
-    method: 'GET',
-    path: '/api/markets'
-  })
+## Event-Driven Architecture
 
-  try {
-    const markets = await fetchMarkets()
-    return NextResponse.json({ success: true, data: markets })
-  } catch (error) {
-    logger.error('Failed to fetch markets', error as Error, { requestId })
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
-  }
+### Event Definition
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Events;
+
+use App\Models\Market;
+use Illuminate\Foundation\Events\Dispatchable;
+use Illuminate\Queue\SerializesModels;
+
+final class MarketCreated
+{
+    use Dispatchable, SerializesModels;
+
+    public function __construct(
+        public readonly Market $market,
+    ) {}
 }
 ```
 
-**Remember**: Backend patterns enable scalable, maintainable server-side applications. Choose patterns that fit your complexity level.
+### Listener
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Listeners;
+
+use App\Events\MarketCreated;
+use App\Jobs\IndexMarketJob;
+use App\Notifications\MarketCreatedNotification;
+
+final class HandleMarketCreated
+{
+    public function handle(MarketCreated $event): void
+    {
+        IndexMarketJob::dispatch($event->market);
+
+        $event->market->user->notify(
+            new MarketCreatedNotification($event->market)
+        );
+    }
+}
+```
+
+### Event Service Provider
+
+```php
+// app/Providers/EventServiceProvider.php
+protected $listen = [
+    MarketCreated::class => [
+        HandleMarketCreated::class,
+    ],
+];
+```
+
+**Remember**: Backend patterns enable scalable, maintainable server-side applications. Follow Laravel conventions and choose patterns that fit your complexity level.
