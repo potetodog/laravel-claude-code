@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "tool == \"Bash\" && tool_input.command matches \"(php artisan serve|npm run dev|pnpm( run)? dev|yarn dev|bun run dev)\"",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "#!/bin/bash\ninput=$(cat)\ncmd=$(echo \"$input\" | jq -r '.tool_input.command // \"\"')\n\necho '[Hook] BLOCKED: Dev server must run in tmux for log access' >&2\necho '[Hook] Use this command instead:' >&2\nif echo \"$cmd\" | grep -q 'php artisan serve'; then\n  echo \"[Hook] tmux new-session -d -s laravel 'php artisan serve'\" >&2\nelse\n  echo \"[Hook] tmux new-session -d -s vite 'npm run dev'\" >&2\nfi\necho '[Hook] Then: tmux attach -t <session-name>' >&2\nexit 1"
+          }
+        ],
+        "description": "Block dev servers outside tmux - ensures you can access logs"
+      },
+      {
+        "matcher": "tool == \"Bash\" && tool_input.command matches \"(composer|php artisan|npm (install|test|run build)|pnpm (install|test|run build)|./vendor/bin/pest|./vendor/bin/phpstan|./vendor/bin/pint)\"",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "#!/bin/bash\ninput=$(cat)\nif [ -z \"$TMUX\" ]; then\n  echo '[Hook] Consider running in tmux for session persistence' >&2\n  echo '[Hook] tmux new -s dev  |  tmux attach -t dev' >&2\nfi\necho \"$input\""
+          }
+        ],
+        "description": "Reminder to use tmux for long-running Laravel/Node commands"
+      },
+      {
+        "matcher": "tool == \"Bash\" && tool_input.command matches \"php artisan migrate(?!:status)\"",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "#!/bin/bash\ninput=$(cat)\necho '[Hook] Migration detected - ensure you have reviewed the migration files' >&2\necho '[Hook] Check: php artisan migrate:status' >&2\necho \"$input\""
+          }
+        ],
+        "description": "Reminder to review migrations before running"
+      },
+      {
+        "matcher": "tool == \"Bash\" && tool_input.command matches \"git push\"",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "#!/bin/bash\necho '[Hook] Review changes before push...' >&2\necho '[Hook] Checklist:' >&2\necho '[Hook]   - ./vendor/bin/pint (PHP formatting)' >&2\necho '[Hook]   - ./vendor/bin/phpstan analyse (static analysis)' >&2\necho '[Hook]   - ./vendor/bin/pest (tests)' >&2\necho '[Hook]   - No dd()/dump()/ray() or console.log?' >&2\ncat"
+          }
+        ],
+        "description": "Checklist reminder before git push"
+      },
+      {
+        "matcher": "tool == \"Write\" && tool_input.file_path matches \"\\\\.(md|txt)$\" && !(tool_input.file_path matches \"README\\\\.md|CLAUDE\\\\.md|AGENTS\\\\.md|CONTRIBUTING\\\\.md\")",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "#!/bin/bash\ninput=$(cat)\nfile_path=$(echo \"$input\" | jq -r '.tool_input.file_path // \"\"')\n\nif [[ \"$file_path\" =~ \\.(md|txt)$ ]] && [[ ! \"$file_path\" =~ (README|CLAUDE|AGENTS|CONTRIBUTING)\\.md$ ]]; then\n  echo \"[Hook] BLOCKED: Unnecessary documentation file creation\" >&2\n  echo \"[Hook] File: $file_path\" >&2\n  echo \"[Hook] Use README.md for documentation instead\" >&2\n  exit 1\nfi\n\necho \"$input\""
+          }
+        ],
+        "description": "Block creation of random .md files - keeps docs consolidated"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "tool == \"Bash\"",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "#!/bin/bash\ninput=$(cat)\ncmd=$(echo \"$input\" | jq -r '.tool_input.command')\n\nif echo \"$cmd\" | grep -qE 'gh pr create'; then\n  output=$(echo \"$input\" | jq -r '.tool_output.output // \"\"')\n  pr_url=$(echo \"$output\" | grep -oE 'https://github.com/[^/]+/[^/]+/pull/[0-9]+')\n  \n  if [ -n \"$pr_url\" ]; then\n    echo \"[Hook] PR created: $pr_url\" >&2\n    echo \"[Hook] Checking GitHub Actions status...\" >&2\n    repo=$(echo \"$pr_url\" | sed -E 's|https://github.com/([^/]+/[^/]+)/pull/[0-9]+|\\1|')\n    pr_num=$(echo \"$pr_url\" | sed -E 's|.*/pull/([0-9]+)|\\1|')\n    echo \"[Hook] To review PR: gh pr review $pr_num --repo $repo\" >&2\n  fi\nfi\n\necho \"$input\""
+          }
+        ],
+        "description": "Log PR URL and provide review command after PR creation"
+      },
+      {
+        "matcher": "(tool == \"Edit\" || tool == \"Write\") && tool_input.file_path matches \"\\\\.php$\"",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "#!/bin/bash\ninput=$(cat)\nfile_path=$(echo \"$input\" | jq -r '.tool_input.file_path // \"\"')\n\nif [ -n \"$file_path\" ] && [ -f \"$file_path\" ]; then\n  if [ -f \"./vendor/bin/pint\" ]; then\n    ./vendor/bin/pint \"$file_path\" 2>&1 | grep -v 'PASS' | head -5 >&2 || true\n  fi\nfi\n\necho \"$input\""
+          }
+        ],
+        "description": "Auto-format PHP files with Laravel Pint after edits"
+      },
+      {
+        "matcher": "(tool == \"Edit\" || tool == \"Write\") && tool_input.file_path matches \"\\\\.php$\"",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "#!/bin/bash\ninput=$(cat)\nfile_path=$(echo \"$input\" | jq -r '.tool_input.file_path // \"\"')\n\nif [ -n \"$file_path\" ] && [ -f \"$file_path\" ]; then\n  debug_calls=$(grep -nE '\\b(dd|dump|ray)\\s*\\(' \"$file_path\" 2>/dev/null || true)\n  \n  if [ -n \"$debug_calls\" ]; then\n    echo \"[Hook] WARNING: Debug statements found in $file_path\" >&2\n    echo \"$debug_calls\" | head -5 >&2\n    echo \"[Hook] Remove dd()/dump()/ray() before committing\" >&2\n  fi\nfi\n\necho \"$input\""
+          }
+        ],
+        "description": "Warn about dd()/dump()/ray() in PHP files after edits"
+      },
+      {
+        "matcher": "(tool == \"Edit\" || tool == \"Write\") && tool_input.file_path matches \"\\\\.(ts|tsx|js|jsx)$\"",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "#!/bin/bash\ninput=$(cat)\nfile_path=$(echo \"$input\" | jq -r '.tool_input.file_path // \"\"')\n\nif [ -n \"$file_path\" ] && [ -f \"$file_path\" ]; then\n  if command -v prettier >/dev/null 2>&1 || [ -f \"./node_modules/.bin/prettier\" ]; then\n    npx prettier --write \"$file_path\" 2>&1 | head -3 >&2 || true\n  fi\nfi\n\necho \"$input\""
+          }
+        ],
+        "description": "Auto-format JS/TS/React files with Prettier after edits"
+      },
+      {
+        "matcher": "(tool == \"Edit\" || tool == \"Write\") && tool_input.file_path matches \"\\\\.(ts|tsx|js|jsx)$\"",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "#!/bin/bash\ninput=$(cat)\nfile_path=$(echo \"$input\" | jq -r '.tool_input.file_path // \"\"')\n\nif [ -n \"$file_path\" ] && [ -f \"$file_path\" ]; then\n  console_logs=$(grep -n \"console\\\\.log\" \"$file_path\" 2>/dev/null || true)\n  \n  if [ -n \"$console_logs\" ]; then\n    echo \"[Hook] WARNING: console.log found in $file_path\" >&2\n    echo \"$console_logs\" | head -5 >&2\n    echo \"[Hook] Remove console.log before committing\" >&2\n  fi\nfi\n\necho \"$input\""
+          }
+        ],
+        "description": "Warn about console.log in JS/TS files after edits"
+      },
+      {
+        "matcher": "(tool == \"Edit\" || tool == \"Write\") && tool_input.file_path matches \"\\\\.(ts|tsx)$\"",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "#!/bin/bash\ninput=$(cat)\nfile_path=$(echo \"$input\" | jq -r '.tool_input.file_path // \"\"')\n\nif [ -n \"$file_path\" ] && [ -f \"$file_path\" ]; then\n  if [ -f \"./tsconfig.json\" ]; then\n    npx tsc --noEmit --pretty false 2>&1 | grep -E \"$file_path\" | head -5 >&2 || true\n  fi\nfi\n\necho \"$input\""
+          }
+        ],
+        "description": "TypeScript check after editing .ts/.tsx files"
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "#!/bin/bash\ninput=$(cat)\n\nif git rev-parse --git-dir > /dev/null 2>&1; then\n  modified_files=$(git diff --name-only HEAD 2>/dev/null || true)\n  \n  if [ -n \"$modified_files\" ]; then\n    has_issues=false\n    \n    # Check PHP files for debug statements\n    php_files=$(echo \"$modified_files\" | grep -E '\\.php$' || true)\n    if [ -n \"$php_files\" ]; then\n      while IFS= read -r file; do\n        if [ -f \"$file\" ]; then\n          if grep -qE '\\b(dd|dump|ray)\\s*\\(' \"$file\" 2>/dev/null; then\n            echo \"[Hook] WARNING: Debug statement (dd/dump/ray) found in $file\" >&2\n            has_issues=true\n          fi\n        fi\n      done <<< \"$php_files\"\n    fi\n    \n    # Check JS/TS files for console.log\n    js_files=$(echo \"$modified_files\" | grep -E '\\.(ts|tsx|js|jsx)$' || true)\n    if [ -n \"$js_files\" ]; then\n      while IFS= read -r file; do\n        if [ -f \"$file\" ]; then\n          if grep -q \"console\\.log\" \"$file\" 2>/dev/null; then\n            echo \"[Hook] WARNING: console.log found in $file\" >&2\n            has_issues=true\n          fi\n        fi\n      done <<< \"$js_files\"\n    fi\n    \n    if [ \"$has_issues\" = true ]; then\n      echo \"[Hook] Remove debug statements before committing\" >&2\n    fi\n  fi\nfi\n\necho \"$input\""
+          }
+        ],
+        "description": "Final audit for debug statements in modified PHP and JS/TS files"
+      }
+    ]
+  }
+}
