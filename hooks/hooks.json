@@ -3,31 +3,11 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "tool == \"Bash\" && tool_input.command matches \"(php artisan serve|npm run dev|pnpm( run)? dev|yarn dev|bun run dev)\"",
+        "matcher": "tool == \"Bash\" && tool_input.command matches \"bash d php artisan migrate(?!:status)\"",
         "hooks": [
           {
             "type": "command",
-            "command": "#!/bin/bash\ninput=$(cat)\ncmd=$(echo \"$input\" | jq -r '.tool_input.command // \"\"')\n\necho '[Hook] BLOCKED: Dev server must run in tmux for log access' >&2\necho '[Hook] Use this command instead:' >&2\nif echo \"$cmd\" | grep -q 'php artisan serve'; then\n  echo \"[Hook] tmux new-session -d -s laravel 'php artisan serve'\" >&2\nelse\n  echo \"[Hook] tmux new-session -d -s vite 'npm run dev'\" >&2\nfi\necho '[Hook] Then: tmux attach -t <session-name>' >&2\nexit 1"
-          }
-        ],
-        "description": "Block dev servers outside tmux - ensures you can access logs"
-      },
-      {
-        "matcher": "tool == \"Bash\" && tool_input.command matches \"(composer|php artisan|npm (install|test|run build)|pnpm (install|test|run build)|./vendor/bin/pest|./vendor/bin/phpstan|./vendor/bin/pint)\"",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "#!/bin/bash\ninput=$(cat)\nif [ -z \"$TMUX\" ]; then\n  echo '[Hook] Consider running in tmux for session persistence' >&2\n  echo '[Hook] tmux new -s dev  |  tmux attach -t dev' >&2\nfi\necho \"$input\""
-          }
-        ],
-        "description": "Reminder to use tmux for long-running Laravel/Node commands"
-      },
-      {
-        "matcher": "tool == \"Bash\" && tool_input.command matches \"php artisan migrate(?!:status)\"",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "#!/bin/bash\ninput=$(cat)\necho '[Hook] Migration detected - ensure you have reviewed the migration files' >&2\necho '[Hook] Check: php artisan migrate:status' >&2\necho \"$input\""
+            "command": "#!/bin/bash\ninput=$(cat)\necho '[Hook] Migration detected - ensure you have reviewed the migration files' >&2\necho '[Hook] Check: bash d php artisan migrate:status' >&2\necho \"$input\""
           }
         ],
         "description": "Reminder to review migrations before running"
@@ -37,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "#!/bin/bash\necho '[Hook] Review changes before push...' >&2\necho '[Hook] Checklist:' >&2\necho '[Hook]   - ./vendor/bin/pint (PHP formatting)' >&2\necho '[Hook]   - ./vendor/bin/phpstan analyse (static analysis)' >&2\necho '[Hook]   - ./vendor/bin/pest (tests)' >&2\necho '[Hook]   - No dd()/dump()/ray() or console.log?' >&2\ncat"
+            "command": "#!/bin/bash\necho '[Hook] Review changes before push...' >&2\necho '[Hook] Checklist:' >&2\necho '[Hook]   - bash d ./vendor/bin/pint (PHP formatting)' >&2\necho '[Hook]   - bash d ./vendor/bin/phpstan analyse (static analysis)' >&2\necho '[Hook]   - bash d ./vendor/bin/pest (tests)' >&2\necho '[Hook]   - No dd()/dump()/ray() or console.log?' >&2\ncat"
           }
         ],
         "description": "Checklist reminder before git push"
@@ -69,7 +49,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "#!/bin/bash\ninput=$(cat)\nfile_path=$(echo \"$input\" | jq -r '.tool_input.file_path // \"\"')\n\nif [ -n \"$file_path\" ] && [ -f \"$file_path\" ]; then\n  if [ -f \"./vendor/bin/pint\" ]; then\n    ./vendor/bin/pint \"$file_path\" 2>&1 | grep -v 'PASS' | head -5 >&2 || true\n  fi\nfi\n\necho \"$input\""
+            "command": "#!/bin/bash\ninput=$(cat)\nfile_path=$(echo \"$input\" | jq -r '.tool_input.file_path // \"\"')\n\nif [ -n \"$file_path\" ] && [ -f \"$file_path\" ]; then\n  bash d ./vendor/bin/pint \"$file_path\" 2>&1 | grep -v 'PASS' | head -5 >&2 || true\nfi\n\necho \"$input\""
           }
         ],
         "description": "Auto-format PHP files with Laravel Pint after edits"

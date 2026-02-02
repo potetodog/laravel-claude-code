@@ -11,11 +11,7 @@ Located in `~/.claude/agents/`:
 | tdd-guide | Test-driven development | New features, bug fixes |
 | code-reviewer | Code review | After writing code |
 | security-reviewer | Security analysis | Before commits, auth changes |
-| build-error-resolver | Fix build errors | When tests/Pint/PHPStan fail |
-| e2e-runner | E2E testing with Dusk | Critical user flows |
 | refactor-cleaner | Dead code cleanup | Code maintenance |
-| doc-updater | Documentation | Updating API docs |
-| migration-planner | Database changes | Schema modifications |
 
 ## Immediate Agent Usage
 
@@ -24,7 +20,6 @@ No user prompt needed:
 2. Code just written/modified - Use **code-reviewer** agent
 3. Bug fix or new feature - Use **tdd-guide** agent
 4. Architectural decision - Use **architect** agent
-5. Database schema changes - Use **migration-planner** agent
 
 ## Parallel Task Execution
 
@@ -46,10 +41,9 @@ First agent 1, then agent 2, then agent 3
 ### New Feature Implementation
 ```
 1. planner → Define feature scope and steps
-2. migration-planner → Design database schema
-3. tdd-guide → Write tests first
-4. code-reviewer → Review implementation
-5. security-reviewer → Security audit
+2. tdd-guide → Write tests first
+3. code-reviewer → Review implementation
+4. security-reviewer → Security audit
 ```
 
 ### API Development

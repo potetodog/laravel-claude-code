@@ -9,7 +9,6 @@
 ## Recommended Hooks (in ~/.claude/settings.json)
 
 ### PreToolUse
-- **tmux reminder**: Suggests tmux for long-running commands (artisan queue:work, etc.)
 - **git push review**: Opens editor for review before push
 - **doc blocker**: Blocks creation of unnecessary .md/.txt files
 
@@ -79,7 +78,7 @@ Common artisan commands to allow:
   "allowedTools": [
     "Bash(php artisan *)",
     "Bash(./vendor/bin/pint *)",
-    "Bash(./vendor/bin/pest *)",
+    "Bash(./vendor/bin/phpunit *)",
     "Bash(./vendor/bin/phpstan *)",
     "Bash(composer *)"
   ]

@@ -36,57 +36,53 @@ The planner agent will:
 ## Example Usage
 
 ```
-User: /plan I need to add real-time notifications when markets resolve
+User: /plan サーベイ回答期限のリマインド通知機能を追加したい
 
 Agent (planner):
-# Implementation Plan: Real-Time Market Resolution Notifications
+# Implementation Plan: サーベイ回答期限リマインド通知
 
 ## Requirements Restatement
-- Send notifications to users when markets they're watching resolve
-- Support multiple notification channels (in-app, email, webhook)
-- Ensure notifications are delivered reliably
-- Include market outcome and user's position result
+- 回答期限が近づいているサーベイについてユーザーに通知を送信
+- 複数の通知チャネル対応（メール、Slack、アプリ内通知）
+- 通知の確実な配信を保証
+- ユーザーごとの通知設定を尊重
 
 ## Implementation Phases
 
 ### Phase 1: Database Schema
-- Add notifications table with columns: id, user_id, market_id, type, status, created_at
-- Add user_notification_preferences table for channel preferences
-- Create indexes on user_id and market_id for performance
+- notifications テーブル作成（id, user_id, survey_id, type, read_at, created_at）
+- notification_preferences テーブル作成（チャネル設定用）
+- user_id, survey_id にインデックス追加
 
-### Phase 2: Notification Service
-- Create notification service in lib/notifications.ts
-- Implement notification queue using BullMQ/Redis
-- Add retry logic for failed deliveries
-- Create notification templates
+### Phase 2: Notification System
+- app/Notifications/SurveyReminderNotification.php 作成
+- app/Services/NotificationService.php でビジネスロジック実装
+- Laravel Queue でバックグラウンド処理
+- 通知テンプレート作成（メール、Slack）
 
-### Phase 3: Integration Points
-- Hook into market resolution logic (when status changes to "resolved")
-- Query all users with positions in market
-- Enqueue notifications for each user
+### Phase 3: Scheduler Integration
+- app/Console/Commands/SendSurveyReminders.php 作成
+- app/Console/Kernel.php でスケジュール登録
+- 期限3日前、1日前、当日のリマインドロジック
 
 ### Phase 4: Frontend Components
-- Create NotificationBell component in header
-- Add NotificationList modal
-- Implement real-time updates via Supabase subscriptions
-- Add notification preferences page
+- NotificationBell.vue コンポーネント作成
+- NotificationList.vue モーダル追加
+- Laravel Echo + Pusher/Reverb でリアルタイム更新
+- 通知設定ページ追加
 
 ## Dependencies
-- Redis (for queue)
-- Email service (SendGrid/Resend)
-- Supabase real-time subscriptions
+- Redis（キュー用）
+- Laravel Echo + Pusher または Reverb
+- メール設定（SMTP/SES）
 
 ## Risks
-- HIGH: Email deliverability (SPF/DKIM required)
-- MEDIUM: Performance with 1000+ users per market
-- MEDIUM: Notification spam if markets resolve frequently
-- LOW: Real-time subscription overhead
+- HIGH: メール配信率（SPF/DKIM設定必須）
+- MEDIUM: 大量ユーザー時のパフォーマンス
+- MEDIUM: 通知スパム防止ロジック
+- LOW: リアルタイム接続のオーバーヘッド
 
 ## Estimated Complexity: MEDIUM
-- Backend: 4-6 hours
-- Frontend: 3-4 hours
-- Testing: 2-3 hours
-- Total: 9-13 hours
 
 **WAITING FOR CONFIRMATION**: Proceed with this plan? (yes/no/modify)
 ```
@@ -104,7 +100,6 @@ If you want changes, respond with:
 
 After planning:
 - Use `/tdd` to implement with test-driven development
-- Use `/build-and-fix` if build errors occur
 - Use `/code-review` to review completed implementation
 
 ## Related Agents

@@ -40,7 +40,7 @@ Create detailed steps with:
 ### 4. Implementation Order
 - Database migrations first
 - Models and relationships
-- Business logic (Actions/Services)
+- Business logic (Services)
 - Controllers and Form Requests
 - Frontend (Inertia pages)
 - Tests
@@ -81,7 +81,7 @@ Create detailed steps with:
    - Risk: Low
 
 ### Phase 2: Business Logic
-3. **Create Action** (app/Actions/Order/CreateOrderAction.php)
+3. **Create Service** (app/Services/Order/CreateOrderService.php)
    - Action: Implement order creation logic
    - Dependencies: Model
    - Risk: Medium
@@ -97,9 +97,10 @@ Create detailed steps with:
    - Dependencies: Action, Form Request
    - Risk: Low
 
-6. **Create API Resource** (app/Http/Resources/OrderResource.php)
-   - Action: JSON response format
-   - Dependencies: Model
+6. **Inertia Data Integration** (app/Http/Controllers/OrderController.php)
+   - Action: Pass data to the frontend using Inertia::render
+   - Details: Map Eloquent models directly to frontend props. Ensure only necessary fields are sent to the client (Security & Performance).
+   - Dependencies: Controller, Model, Frontend Component
    - Risk: Low
 
 ### Phase 4: Frontend (Inertia)
@@ -137,13 +138,13 @@ Model: Order.php (singular)
 Controller: OrderController.php
 Form Request: StoreOrderRequest.php, UpdateOrderRequest.php
 Resource: OrderResource.php
-Action: CreateOrderAction.php
+Service: CreateOrderService.php
 Policy: OrderPolicy.php
 Test: OrderTest.php
 ```
 
 ### Common Patterns to Follow
-- Thin controllers (delegate to Actions)
+- Thin controllers (delegate to Services)
 - Form Request for validation
 - API Resources for responses
 - Policies for authorization

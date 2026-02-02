@@ -1,19 +1,20 @@
 # Testing Requirements (Laravel 12.x)
 
-## Test Framework: Pest PHP
+## Test Framework: PHPUnit
 
-Laravel 12 uses Pest as the default testing framework:
+Laravel uses PHPUnit for testing:
 
 ```bash
-./vendor/bin/pest              # Run all tests
-./vendor/bin/pest --parallel   # Parallel execution
-./vendor/bin/pest --coverage   # With coverage report
+php artisan test                    # Run all tests
+php artisan test --parallel         # Parallel execution
+php artisan test --coverage         # With coverage report
+php artisan test --compact          # Compact output
 ```
 
 ## Minimum Test Coverage: 80%
 
 Test Types (ALL required):
-1. **Unit Tests** - Services, Actions, DTOs, Helpers
+1. **Unit Tests** - Services, DTOs, Helpers
 2. **Feature Tests** - HTTP requests, API endpoints
 3. **Integration Tests** - Database operations, queues
 
@@ -27,6 +28,16 @@ MANDATORY workflow:
 5. Refactor (IMPROVE)
 6. Verify coverage (80%+)
 
+## Creating Tests
+
+```bash
+# Feature test (default)
+php artisan make:test OrderControllerTest
+
+# Unit test
+php artisan make:test Services/PaymentServiceTest --unit
+```
+
 ## Unit Test Example
 
 ```php
@@ -34,15 +45,25 @@ MANDATORY workflow:
 
 declare(strict_types=1);
 
-use App\Services\PriceCalculator;
+namespace Tests\Unit\Services;
+
 use App\DTOs\OrderItemData;
+use App\Services\PriceCalculator;
+use InvalidArgumentException;
+use PHPUnit\Framework\TestCase;
 
-describe('PriceCalculator', function () {
-    beforeEach(function () {
+final class PriceCalculatorTest extends TestCase
+{
+    private PriceCalculator $calculator;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
         $this->calculator = new PriceCalculator();
-    });
+    }
 
-    it('calculates subtotal correctly', function () {
+    public function test_calculates_subtotal_correctly(): void
+    {
         $items = [
             new OrderItemData(price: 100, quantity: 2),
             new OrderItemData(price: 50, quantity: 3),
@@ -50,20 +71,23 @@ describe('PriceCalculator', function () {
 
         $result = $this->calculator->subtotal($items);
 
-        expect($result)->toBe(350);
-    });
+        $this->assertSame(350, $result);
+    }
 
-    it('applies discount percentage', function () {
+    public function test_applies_discount_percentage(): void
+    {
         $result = $this->calculator->applyDiscount(100, 10);
 
-        expect($result)->toBe(90);
-    });
+        $this->assertSame(90, $result);
+    }
 
-    it('throws exception for invalid discount', function () {
-        expect(fn () => $this->calculator->applyDiscount(100, 150))
-            ->toThrow(InvalidArgumentException::class);
-    });
-});
+    public function test_throws_exception_for_invalid_discount(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+
+        $this->calculator->applyDiscount(100, 150);
+    }
+}
 ```
 
 ## Feature Test Example
@@ -73,11 +97,19 @@ describe('PriceCalculator', function () {
 
 declare(strict_types=1);
 
-use App\Models\User;
-use App\Models\Order;
+namespace Tests\Feature\Http\Controllers;
 
-describe('Order API', function () {
-    it('creates an order for authenticated user', function () {
+use App\Models\Order;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+final class OrderControllerTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_creates_an_order_for_authenticated_user(): void
+    {
         $user = User::factory()->create();
 
         $response = $this->actingAs($user)
@@ -96,17 +128,19 @@ describe('Order API', function () {
             'user_id' => $user->id,
             'status' => 'pending',
         ]);
-    });
+    }
 
-    it('requires authentication', function () {
+    public function test_requires_authentication(): void
+    {
         $response = $this->postJson('/api/orders', [
             'items' => [['product_id' => 1, 'quantity' => 2]],
         ]);
 
         $response->assertUnauthorized();
-    });
+    }
 
-    it('validates request data', function () {
+    public function test_validates_request_data(): void
+    {
         $user = User::factory()->create();
 
         $response = $this->actingAs($user)
@@ -114,8 +148,8 @@ describe('Order API', function () {
 
         $response->assertUnprocessable()
             ->assertJsonValidationErrors(['items']);
-    });
-});
+    }
+}
 ```
 
 ## Database Testing
@@ -127,18 +161,26 @@ Use RefreshDatabase for isolation:
 
 declare(strict_types=1);
 
+namespace Tests\Feature;
+
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
 
-uses(RefreshDatabase::class);
+final class UserDeletionTest extends TestCase
+{
+    use RefreshDatabase;
 
-it('soft deletes a user', function () {
-    $user = User::factory()->create();
+    public function test_soft_deletes_a_user(): void
+    {
+        $user = User::factory()->create();
 
-    $user->delete();
+        $user->delete();
 
-    $this->assertSoftDeleted('users', ['id' => $user->id]);
-    expect(User::withTrashed()->find($user->id))->not->toBeNull();
-});
+        $this->assertSoftDeleted('users', ['id' => $user->id]);
+        $this->assertNotNull(User::withTrashed()->find($user->id));
+    }
+}
 ```
 
 ## Mocking & Fakes
@@ -146,37 +188,50 @@ it('soft deletes a user', function () {
 ```php
 <?php
 
+declare(strict_types=1);
+
+namespace Tests\Feature;
+
+use App\Jobs\ProcessOrder;
+use App\Mail\OrderConfirmation;
+use App\Models\Order;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Queue;
-use Illuminate\Support\Facades\Notification;
-use App\Mail\OrderConfirmation;
-use App\Jobs\ProcessOrder;
+use Tests\TestCase;
 
-it('sends order confirmation email', function () {
-    Mail::fake();
+final class OrderNotificationTest extends TestCase
+{
+    use RefreshDatabase;
 
-    $order = Order::factory()->create();
+    public function test_sends_order_confirmation_email(): void
+    {
+        Mail::fake();
 
-    // Trigger action that sends email
-    app(SendOrderConfirmationAction::class)->execute($order);
+        $order = Order::factory()->create();
 
-    Mail::assertSent(OrderConfirmation::class, function ($mail) use ($order) {
-        return $mail->hasTo($order->user->email)
-            && $mail->order->id === $order->id;
-    });
-});
+        // Trigger action that sends email
+        app(SendOrderConfirmationAction::class)->execute($order);
 
-it('dispatches order processing job', function () {
-    Queue::fake();
+        Mail::assertSent(OrderConfirmation::class, function ($mail) use ($order) {
+            return $mail->hasTo($order->user->email)
+                && $mail->order->id === $order->id;
+        });
+    }
 
-    $order = Order::factory()->create();
+    public function test_dispatches_order_processing_job(): void
+    {
+        Queue::fake();
 
-    app(CreateOrderAction::class)->execute($order->user, $order->items);
+        $order = Order::factory()->create();
 
-    Queue::assertPushed(ProcessOrder::class, fn ($job) =>
-        $job->order->id === $order->id
-    );
-});
+        app(CreateOrderAction::class)->execute($order->user, $order->items);
+
+        Queue::assertPushed(ProcessOrder::class, fn ($job) =>
+            $job->order->id === $order->id
+        );
+    }
+}
 ```
 
 ## HTTP Test Helpers
@@ -217,16 +272,29 @@ tests/
 │       └── V1/
 │           └── OrderApiTest.php
 ├── Unit/
-│   ├── Actions/
-│   │   └── CreateOrderActionTest.php
 │   ├── Services/
 │   │   └── PaymentServiceTest.php
 │   └── DTOs/
 │       └── OrderDataTest.php
-└── Pest.php
+└── TestCase.php
+```
+
+## Running Tests
+
+```bash
+# Run all tests
+php artisan test --compact
+
+# Run specific test file
+php artisan test --compact tests/Feature/Http/Controllers/OrderControllerTest.php
+
+# Filter by test method name
+php artisan test --compact --filter=test_creates_an_order
+
+# Run with coverage
+php artisan test --coverage --min=80
 ```
 
 ## Agent Support
 
 - **tdd-guide** - Use PROACTIVELY for new features, enforces write-tests-first
-- **e2e-runner** - Browser testing with Laravel Dusk

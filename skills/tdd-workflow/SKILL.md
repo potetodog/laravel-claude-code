@@ -1,11 +1,11 @@
 ---
 name: tdd-workflow
-description: Use this skill when writing new features, fixing bugs, or refactoring code. Enforces test-driven development with Pest PHP, including unit, feature, and integration tests with 80%+ coverage.
+description: Use this skill when writing new features, fixing bugs, or refactoring code. Enforces test-driven development with PHPUnit, including unit, feature, and integration tests with 80%+ coverage.
 ---
 
 # Test-Driven Development Workflow
 
-This skill ensures all Laravel code development follows TDD principles with comprehensive test coverage using Pest PHP.
+This skill ensures all Laravel code development follows TDD principles with comprehensive test coverage using PHPUnit.
 
 ## When to Activate
 
@@ -64,30 +64,47 @@ For each user story, create comprehensive test cases:
 ```php
 <?php
 
+declare(strict_types=1);
+
+namespace Tests\Feature\Http\Controllers;
+
 use App\Models\User;
 use App\Models\Market;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
 
-describe('Create Market', function () {
-    beforeEach(function () {
+final class CreateMarketTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private User $user;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
         $this->user = User::factory()->create();
-    });
+    }
 
-    test('user can create market with valid data', function () {
+    public function test_user_can_create_market_with_valid_data(): void
+    {
         // Test implementation
-    });
+    }
 
-    test('returns validation errors for invalid data', function () {
+    public function test_returns_validation_errors_for_invalid_data(): void
+    {
         // Test edge case
-    });
+    }
 
-    test('requires authentication', function () {
+    public function test_requires_authentication(): void
+    {
         // Test auth requirement
-    });
+    }
 
-    test('fires MarketCreated event', function () {
+    public function test_fires_market_created_event(): void
+    {
         // Test event dispatch
-    });
-});
+    }
+}
 ```
 
 ### Step 3: Run Tests (They Should Fail)
@@ -129,307 +146,405 @@ php artisan test --coverage --min=80
 # Verify 80%+ coverage achieved
 ```
 
-## Testing Patterns with Pest PHP
+## Testing Patterns with PHPUnit
 
 ### Unit Test Pattern
 ```php
 <?php
+
+declare(strict_types=1);
+
+namespace Tests\Unit\Actions\Market;
 
 use App\Actions\Market\CreateMarketAction;
 use App\DTOs\CreateMarketData;
 use App\Models\User;
 use App\Models\Market;
 use App\Models\Category;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
 
-beforeEach(function () {
-    $this->user = User::factory()->create();
-    $this->category = Category::factory()->create();
-});
+final class CreateMarketActionTest extends TestCase
+{
+    use RefreshDatabase;
 
-test('creates market with valid data', function () {
-    // Arrange
-    $data = new CreateMarketData(
-        userId: $this->user->id,
-        name: 'Test Market',
-        description: 'Test Description',
-        endDate: now()->addDays(30),
-        categoryIds: [$this->category->id],
-    );
+    private User $user;
+    private Category $category;
 
-    // Act
-    $market = app(CreateMarketAction::class)->execute($data);
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->user = User::factory()->create();
+        $this->category = Category::factory()->create();
+    }
 
-    // Assert
-    expect($market)
-        ->toBeInstanceOf(Market::class)
-        ->name->toBe('Test Market')
-        ->description->toBe('Test Description')
-        ->user_id->toBe($this->user->id);
+    public function test_creates_market_with_valid_data(): void
+    {
+        // Arrange
+        $data = new CreateMarketData(
+            userId: $this->user->id,
+            name: 'Test Market',
+            description: 'Test Description',
+            endDate: now()->addDays(30),
+            categoryIds: [$this->category->id],
+        );
 
-    expect($market->categories)->toHaveCount(1);
+        // Act
+        $market = app(CreateMarketAction::class)->execute($data);
 
-    $this->assertDatabaseHas('markets', [
-        'name' => 'Test Market',
-        'user_id' => $this->user->id,
-    ]);
-});
+        // Assert
+        $this->assertInstanceOf(Market::class, $market);
+        $this->assertSame('Test Market', $market->name);
+        $this->assertSame('Test Description', $market->description);
+        $this->assertSame($this->user->id, $market->user_id);
+        $this->assertCount(1, $market->categories);
 
-test('wraps operation in transaction', function () {
-    $data = new CreateMarketData(
-        userId: $this->user->id,
-        name: 'Test Market',
-        description: 'Test Description',
-        endDate: now()->addDays(30),
-        categoryIds: [999], // Non-existent category
-    );
+        $this->assertDatabaseHas('markets', [
+            'name' => 'Test Market',
+            'user_id' => $this->user->id,
+        ]);
+    }
 
-    expect(fn () => app(CreateMarketAction::class)->execute($data))
-        ->toThrow(\Exception::class);
+    public function test_wraps_operation_in_transaction(): void
+    {
+        $data = new CreateMarketData(
+            userId: $this->user->id,
+            name: 'Test Market',
+            description: 'Test Description',
+            endDate: now()->addDays(30),
+            categoryIds: [999], // Non-existent category
+        );
 
-    $this->assertDatabaseMissing('markets', [
-        'name' => 'Test Market',
-    ]);
-});
+        $this->expectException(\Exception::class);
+
+        app(CreateMarketAction::class)->execute($data);
+
+        $this->assertDatabaseMissing('markets', [
+            'name' => 'Test Market',
+        ]);
+    }
+}
 ```
 
 ### Feature Test Pattern (HTTP)
 ```php
 <?php
 
+declare(strict_types=1);
+
+namespace Tests\Feature\Http\Controllers;
+
 use App\Models\User;
 use App\Models\Market;
 use App\Models\Category;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
 
-beforeEach(function () {
-    $this->user = User::factory()->create();
-    $this->category = Category::factory()->create();
-});
+final class MarketControllerTest extends TestCase
+{
+    use RefreshDatabase;
 
-test('user can view markets list', function () {
-    Market::factory()->count(3)->create();
+    private User $user;
+    private Category $category;
 
-    $response = $this->actingAs($this->user)
-        ->get(route('markets.index'));
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->user = User::factory()->create();
+        $this->category = Category::factory()->create();
+    }
 
-    $response
-        ->assertOk()
-        ->assertInertia(fn ($page) => $page
-            ->component('Markets/Index')
-            ->has('markets.data', 3)
-        );
-});
+    public function test_user_can_view_markets_list(): void
+    {
+        Market::factory()->count(3)->create();
 
-test('user can create market', function () {
-    $response = $this->actingAs($this->user)
-        ->post(route('markets.store'), [
+        $response = $this->actingAs($this->user)
+            ->get(route('markets.index'));
+
+        $response
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('Markets/Index')
+                ->has('markets.data', 3)
+            );
+    }
+
+    public function test_user_can_create_market(): void
+    {
+        $response = $this->actingAs($this->user)
+            ->post(route('markets.store'), [
+                'name' => 'New Market',
+                'description' => 'Market description',
+                'end_date' => now()->addDays(30)->toDateString(),
+                'category_ids' => [$this->category->id],
+            ]);
+
+        $response->assertRedirect();
+
+        $this->assertDatabaseHas('markets', [
             'name' => 'New Market',
-            'description' => 'Market description',
-            'end_date' => now()->addDays(30)->toDateString(),
-            'category_ids' => [$this->category->id],
+            'user_id' => $this->user->id,
+        ]);
+    }
+
+    public function test_validates_required_fields(): void
+    {
+        $response = $this->actingAs($this->user)
+            ->post(route('markets.store'), []);
+
+        $response
+            ->assertSessionHasErrors(['name', 'description', 'end_date']);
+    }
+
+    public function test_requires_authentication(): void
+    {
+        $response = $this->post(route('markets.store'), [
+            'name' => 'New Market',
         ]);
 
-    $response->assertRedirect();
-
-    $this->assertDatabaseHas('markets', [
-        'name' => 'New Market',
-        'user_id' => $this->user->id,
-    ]);
-});
-
-test('validates required fields', function () {
-    $response = $this->actingAs($this->user)
-        ->post(route('markets.store'), []);
-
-    $response
-        ->assertSessionHasErrors(['name', 'description', 'end_date']);
-});
-
-test('requires authentication', function () {
-    $response = $this->post(route('markets.store'), [
-        'name' => 'New Market',
-    ]);
-
-    $response->assertRedirect(route('login'));
-});
+        $response->assertRedirect(route('login'));
+    }
+}
 ```
 
 ### API Test Pattern
 ```php
 <?php
 
+declare(strict_types=1);
+
+namespace Tests\Feature\Api;
+
 use App\Models\User;
 use App\Models\Market;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
+use Tests\TestCase;
 
-beforeEach(function () {
-    $this->user = User::factory()->create();
-});
+final class MarketApiTest extends TestCase
+{
+    use RefreshDatabase;
 
-test('returns markets list', function () {
-    Market::factory()->count(3)->create();
+    private User $user;
 
-    Sanctum::actingAs($this->user);
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->user = User::factory()->create();
+    }
 
-    $response = $this->getJson(route('api.markets.index'));
+    public function test_returns_markets_list(): void
+    {
+        Market::factory()->count(3)->create();
 
-    $response
-        ->assertOk()
-        ->assertJsonStructure([
-            'data' => [
-                '*' => ['id', 'name', 'description', 'status', 'created_at'],
-            ],
-            'links',
-            'meta',
-        ])
-        ->assertJsonCount(3, 'data');
-});
+        Sanctum::actingAs($this->user);
 
-test('returns single market', function () {
-    $market = Market::factory()->create(['name' => 'Test Market']);
+        $response = $this->getJson(route('api.markets.index'));
 
-    Sanctum::actingAs($this->user);
+        $response
+            ->assertOk()
+            ->assertJsonStructure([
+                'data' => [
+                    '*' => ['id', 'name', 'description', 'status', 'created_at'],
+                ],
+                'links',
+                'meta',
+            ])
+            ->assertJsonCount(3, 'data');
+    }
 
-    $response = $this->getJson(route('api.markets.show', $market));
+    public function test_returns_single_market(): void
+    {
+        $market = Market::factory()->create(['name' => 'Test Market']);
 
-    $response
-        ->assertOk()
-        ->assertJsonPath('data.name', 'Test Market');
-});
+        Sanctum::actingAs($this->user);
 
-test('returns 404 for non-existent market', function () {
-    Sanctum::actingAs($this->user);
+        $response = $this->getJson(route('api.markets.show', $market));
 
-    $response = $this->getJson(route('api.markets.show', 999));
+        $response
+            ->assertOk()
+            ->assertJsonPath('data.name', 'Test Market');
+    }
 
-    $response->assertNotFound();
-});
+    public function test_returns_404_for_non_existent_market(): void
+    {
+        Sanctum::actingAs($this->user);
 
-test('requires authentication', function () {
-    $response = $this->getJson(route('api.markets.index'));
+        $response = $this->getJson(route('api.markets.show', 999));
 
-    $response->assertUnauthorized();
-});
+        $response->assertNotFound();
+    }
+
+    public function test_requires_authentication(): void
+    {
+        $response = $this->getJson(route('api.markets.index'));
+
+        $response->assertUnauthorized();
+    }
+}
 ```
 
 ### Authorization Test Pattern
 ```php
 <?php
 
+declare(strict_types=1);
+
+namespace Tests\Feature\Http\Controllers;
+
 use App\Models\User;
 use App\Models\Market;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
 
-test('owner can update market', function () {
-    $user = User::factory()->create();
-    $market = Market::factory()->create(['user_id' => $user->id]);
+final class MarketAuthorizationTest extends TestCase
+{
+    use RefreshDatabase;
 
-    $response = $this->actingAs($user)
-        ->put(route('markets.update', $market), [
-            'name' => 'Updated Name',
-            'description' => $market->description,
-            'end_date' => $market->end_date->toDateString(),
-        ]);
+    public function test_owner_can_update_market(): void
+    {
+        $user = User::factory()->create();
+        $market = Market::factory()->create(['user_id' => $user->id]);
 
-    $response->assertRedirect();
+        $response = $this->actingAs($user)
+            ->put(route('markets.update', $market), [
+                'name' => 'Updated Name',
+                'description' => $market->description,
+                'end_date' => $market->end_date->toDateString(),
+            ]);
 
-    expect($market->fresh()->name)->toBe('Updated Name');
-});
+        $response->assertRedirect();
 
-test('non-owner cannot update market', function () {
-    $owner = User::factory()->create();
-    $otherUser = User::factory()->create();
-    $market = Market::factory()->create(['user_id' => $owner->id]);
+        $this->assertSame('Updated Name', $market->fresh()->name);
+    }
 
-    $response = $this->actingAs($otherUser)
-        ->put(route('markets.update', $market), [
-            'name' => 'Updated Name',
-        ]);
+    public function test_non_owner_cannot_update_market(): void
+    {
+        $owner = User::factory()->create();
+        $otherUser = User::factory()->create();
+        $market = Market::factory()->create(['user_id' => $owner->id]);
 
-    $response->assertForbidden();
-});
+        $response = $this->actingAs($otherUser)
+            ->put(route('markets.update', $market), [
+                'name' => 'Updated Name',
+            ]);
 
-test('admin can delete any market', function () {
-    $admin = User::factory()->create(['is_admin' => true]);
-    $market = Market::factory()->create();
+        $response->assertForbidden();
+    }
 
-    $response = $this->actingAs($admin)
-        ->delete(route('markets.destroy', $market));
+    public function test_admin_can_delete_any_market(): void
+    {
+        $admin = User::factory()->create(['is_admin' => true]);
+        $market = Market::factory()->create();
 
-    $response->assertRedirect();
+        $response = $this->actingAs($admin)
+            ->delete(route('markets.destroy', $market));
 
-    $this->assertDatabaseMissing('markets', ['id' => $market->id]);
-});
+        $response->assertRedirect();
+
+        $this->assertDatabaseMissing('markets', ['id' => $market->id]);
+    }
+}
 ```
 
 ### Event Test Pattern
 ```php
 <?php
 
+declare(strict_types=1);
+
+namespace Tests\Feature\Events;
+
 use App\Events\MarketCreated;
 use App\Listeners\HandleMarketCreated;
 use App\Jobs\IndexMarketJob;
 use App\Models\User;
+use App\Models\Market;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
+use Tests\TestCase;
 
-test('fires MarketCreated event when market is created', function () {
-    Event::fake([MarketCreated::class]);
+final class MarketEventTest extends TestCase
+{
+    use RefreshDatabase;
 
-    $user = User::factory()->create();
+    public function test_fires_market_created_event_when_market_is_created(): void
+    {
+        Event::fake([MarketCreated::class]);
 
-    $this->actingAs($user)
-        ->post(route('markets.store'), [
-            'name' => 'New Market',
-            'description' => 'Description',
-            'end_date' => now()->addDays(30)->toDateString(),
-            'category_ids' => [],
-        ]);
+        $user = User::factory()->create();
 
-    Event::assertDispatched(MarketCreated::class, function ($event) {
-        return $event->market->name === 'New Market';
-    });
-});
+        $this->actingAs($user)
+            ->post(route('markets.store'), [
+                'name' => 'New Market',
+                'description' => 'Description',
+                'end_date' => now()->addDays(30)->toDateString(),
+                'category_ids' => [],
+            ]);
 
-test('listener dispatches index job', function () {
-    Queue::fake();
+        Event::assertDispatched(MarketCreated::class, function ($event) {
+            return $event->market->name === 'New Market';
+        });
+    }
 
-    $market = Market::factory()->create();
-    $event = new MarketCreated($market);
+    public function test_listener_dispatches_index_job(): void
+    {
+        Queue::fake();
 
-    app(HandleMarketCreated::class)->handle($event);
+        $market = Market::factory()->create();
+        $event = new MarketCreated($market);
 
-    Queue::assertPushed(IndexMarketJob::class, function ($job) use ($market) {
-        return $job->market->id === $market->id;
-    });
-});
+        app(HandleMarketCreated::class)->handle($event);
+
+        Queue::assertPushed(IndexMarketJob::class, function ($job) use ($market) {
+            return $job->market->id === $market->id;
+        });
+    }
+}
 ```
 
 ### Job Test Pattern
 ```php
 <?php
 
+declare(strict_types=1);
+
+namespace Tests\Feature\Jobs;
+
 use App\Jobs\IndexMarketJob;
 use App\Models\Market;
 use App\Services\SearchIndexService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Mockery;
+use Tests\TestCase;
 
-test('indexes market', function () {
-    $market = Market::factory()->create();
+final class IndexMarketJobTest extends TestCase
+{
+    use RefreshDatabase;
 
-    $mockService = $this->mock(SearchIndexService::class);
-    $mockService->shouldReceive('indexMarket')
-        ->once()
-        ->with(\Mockery::on(fn ($m) => $m->id === $market->id));
+    public function test_indexes_market(): void
+    {
+        $market = Market::factory()->create();
 
-    $job = new IndexMarketJob($market);
-    $job->handle($mockService);
-});
+        $mockService = $this->mock(SearchIndexService::class);
+        $mockService->shouldReceive('indexMarket')
+            ->once()
+            ->with(Mockery::on(fn ($m) => $m->id === $market->id));
 
-test('retries on failure', function () {
-    $market = Market::factory()->create();
-    $job = new IndexMarketJob($market);
+        $job = new IndexMarketJob($market);
+        $job->handle($mockService);
+    }
 
-    expect($job->tries)->toBe(3);
-    expect($job->backoff)->toBe(60);
-});
+    public function test_retries_on_failure(): void
+    {
+        $market = Market::factory()->create();
+        $job = new IndexMarketJob($market);
+
+        $this->assertSame(3, $job->tries);
+        $this->assertSame(60, $job->backoff);
+    }
+}
 ```
 
 ## Test File Organization
@@ -441,11 +556,13 @@ tests/
 │   │   ├── Controllers/
 │   │   │   ├── MarketControllerTest.php
 │   │   │   └── Api/
-│   │   │       └── MarketControllerTest.php
+│   │   │       └── MarketApiTest.php
 │   │   └── Middleware/
 │   ├── Actions/
 │   │   └── Market/
 │   │       └── CreateMarketActionTest.php
+│   ├── Events/
+│   │   └── MarketEventTest.php
 │   └── Jobs/
 │       └── IndexMarketJobTest.php
 ├── Unit/
@@ -457,27 +574,7 @@ tests/
 │   │   └── MarketQueryBuilderTest.php
 │   └── Services/
 │       └── PaymentServiceTest.php
-└── Pest.php
-```
-
-## Pest Configuration
-
-```php
-<?php
-// tests/Pest.php
-
-use Illuminate\Foundation\Testing\RefreshDatabase;
-use Tests\TestCase;
-
-uses(TestCase::class, RefreshDatabase::class)->in('Feature');
-uses(TestCase::class)->in('Unit');
-
-expect()->extend('toBeValidMarket', function () {
-    return $this
-        ->toBeInstanceOf(\App\Models\Market::class)
-        ->name->not->toBeEmpty()
-        ->user_id->toBeInt();
-});
+└── TestCase.php
 ```
 
 ## Mocking External Services
@@ -486,76 +583,119 @@ expect()->extend('toBeValidMarket', function () {
 ```php
 <?php
 
+declare(strict_types=1);
+
+namespace Tests\Feature\Services;
+
+use App\Exceptions\ServiceUnavailableException;
+use App\Services\ExternalService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Tests\TestCase;
 
-test('handles external API call', function () {
-    Http::fake([
-        'api.example.com/*' => Http::response([
-            'data' => ['id' => 1, 'name' => 'Test'],
-        ], 200),
-    ]);
+final class ExternalServiceTest extends TestCase
+{
+    use RefreshDatabase;
 
-    $result = app(ExternalService::class)->fetchData();
+    public function test_handles_external_api_call(): void
+    {
+        Http::fake([
+            'api.example.com/*' => Http::response([
+                'data' => ['id' => 1, 'name' => 'Test'],
+            ], 200),
+        ]);
 
-    expect($result)->toBe(['id' => 1, 'name' => 'Test']);
+        $result = app(ExternalService::class)->fetchData();
 
-    Http::assertSent(function ($request) {
-        return $request->url() === 'https://api.example.com/data';
-    });
-});
+        $this->assertSame(['id' => 1, 'name' => 'Test'], $result);
 
-test('handles API failure gracefully', function () {
-    Http::fake([
-        'api.example.com/*' => Http::response(null, 500),
-    ]);
+        Http::assertSent(function ($request) {
+            return $request->url() === 'https://api.example.com/data';
+        });
+    }
 
-    expect(fn () => app(ExternalService::class)->fetchData())
-        ->toThrow(ServiceUnavailableException::class);
-});
+    public function test_handles_api_failure_gracefully(): void
+    {
+        Http::fake([
+            'api.example.com/*' => Http::response(null, 500),
+        ]);
+
+        $this->expectException(ServiceUnavailableException::class);
+
+        app(ExternalService::class)->fetchData();
+    }
+}
 ```
 
 ### Cache Mock
 ```php
 <?php
 
+declare(strict_types=1);
+
+namespace Tests\Feature\Repositories;
+
+use App\Models\Market;
+use App\Repositories\MarketRepository;
 use Illuminate\Support\Facades\Cache;
+use Mockery;
+use Tests\TestCase;
 
-test('caches result', function () {
-    Cache::shouldReceive('remember')
-        ->once()
-        ->with('market:1', \Mockery::any(), \Mockery::any())
-        ->andReturn($market = Market::factory()->make());
+final class MarketRepositoryTest extends TestCase
+{
+    public function test_caches_result(): void
+    {
+        $market = Market::factory()->make();
 
-    $result = app(MarketRepository::class)->findById(1);
+        Cache::shouldReceive('remember')
+            ->once()
+            ->with('market:1', Mockery::any(), Mockery::any())
+            ->andReturn($market);
 
-    expect($result)->toBe($market);
-});
+        $result = app(MarketRepository::class)->findById(1);
+
+        $this->assertSame($market, $result);
+    }
+}
 ```
 
 ### Mail Mock
 ```php
 <?php
 
+declare(strict_types=1);
+
+namespace Tests\Feature\Http\Controllers;
+
 use App\Mail\MarketCreatedMail;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Mail;
+use Tests\TestCase;
 
-test('sends email when market is created', function () {
-    Mail::fake();
+final class MarketNotificationTest extends TestCase
+{
+    use RefreshDatabase;
 
-    $user = User::factory()->create();
+    public function test_sends_email_when_market_is_created(): void
+    {
+        Mail::fake();
 
-    $this->actingAs($user)
-        ->post(route('markets.store'), [
-            'name' => 'New Market',
-            'description' => 'Description',
-            'end_date' => now()->addDays(30)->toDateString(),
-            'category_ids' => [],
-        ]);
+        $user = User::factory()->create();
 
-    Mail::assertSent(MarketCreatedMail::class, function ($mail) use ($user) {
-        return $mail->hasTo($user->email);
-    });
-});
+        $this->actingAs($user)
+            ->post(route('markets.store'), [
+                'name' => 'New Market',
+                'description' => 'Description',
+                'end_date' => now()->addDays(30)->toDateString(),
+                'category_ids' => [],
+            ]);
+
+        Mail::assertSent(MarketCreatedMail::class, function ($mail) use ($user) {
+            return $mail->hasTo($user->email);
+        });
+    }
+}
 ```
 
 ## Test Coverage Verification
@@ -593,13 +733,13 @@ php artisan test --coverage
 ### Wrong: Testing Implementation Details
 ```php
 // Don't test internal state
-expect($service->cachedData)->toBe($expectedData);
+$this->assertSame($expectedData, $service->cachedData);
 ```
 
 ### Correct: Test Observable Behavior
 ```php
 // Test what the user/system sees
-expect($service->getData())->toBe($expectedData);
+$this->assertSame($expectedData, $service->getData());
 ```
 
 ### Wrong: Brittle Database Assertions
@@ -620,22 +760,24 @@ $this->assertDatabaseHas('markets', [
 ### Wrong: No Test Isolation
 ```php
 // Tests depend on each other
-test('creates user', function () { });
-test('updates same user', function () { }); // depends on previous test
+public function test_creates_user(): void { }
+public function test_updates_same_user(): void { } // depends on previous test
 ```
 
 ### Correct: Independent Tests
 ```php
 // Each test sets up its own data
-test('creates user', function () {
+public function test_creates_user(): void
+{
     $user = User::factory()->create();
     // Test logic
-});
+}
 
-test('updates user', function () {
+public function test_updates_user(): void
+{
     $user = User::factory()->create();
     // Update logic
-});
+}
 ```
 
 ## Best Practices

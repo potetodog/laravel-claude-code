@@ -1,0 +1,28 @@
+{
+    "permissions": {
+        "allow": [
+            "Bash(bash d php artisan *)",
+            "Bash(bash d composer *)",
+            "Bash(bash d npm *)",
+            "Bash(bash d ./vendor/bin/phpunit *)",
+            "Bash(bash d ./vendor/bin/pint *)",
+            "Bash(bash d ./vendor/bin/phpstan *)",
+            "Bash(bash d ls *)",
+            "Bash(bash d cat *)",
+            "Bash(git status *)",
+            "Bash(git diff *)",
+            "Bash(git log *)",
+            "Bash(git branch *)",
+            "Bash(git show *)",
+            "Bash(git stash list)",
+            "Bash(gh pr view *)",
+            "Bash(gh pr list *)",
+            "Bash(gh pr checks *)",
+            "Bash(gh issue view *)",
+            "Bash(gh issue list *)"
+        ],
+        "deny": [],
+        "ask": []
+    },
+    "enabledMcpjsonServers": ["laravel-boost"]
+}

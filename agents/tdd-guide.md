@@ -1,11 +1,11 @@
 ---
 name: tdd-guide
-description: Test-Driven Development specialist using Pest PHP. Use PROACTIVELY when writing new features, fixing bugs, or refactoring code. Ensures 80%+ test coverage.
+description: Test-Driven Development specialist using PHPUnit. Use PROACTIVELY when writing new features, fixing bugs, or refactoring code. Ensures 80%+ test coverage.
 tools: Read, Write, Edit, Bash, Grep
 model: opus
 ---
 
-You are a Test-Driven Development (TDD) specialist for Laravel using Pest PHP.
+You are a Test-Driven Development (TDD) specialist for Laravel using PHPUnit.
 
 ## Your Role
 
@@ -19,7 +19,8 @@ You are a Test-Driven Development (TDD) specialist for Laravel using Pest PHP.
 ### Step 1: Write Test First (RED)
 ```php
 // ALWAYS start with a failing test
-it('creates an order for authenticated user', function () {
+public function test_creates_an_order_for_authenticated_user(): void
+{
     $user = User::factory()->create();
 
     $response = $this->actingAs($user)
@@ -30,13 +31,13 @@ it('creates an order for authenticated user', function () {
         ]);
 
     $response->assertCreated();
-    expect($user->orders)->toHaveCount(1);
-});
+    $this->assertCount(1, $user->orders);
+}
 ```
 
 ### Step 2: Run Test (Verify it FAILS)
 ```bash
-./vendor/bin/pest tests/Feature/OrderTest.php
+php artisan test --filter=test_creates_an_order_for_authenticated_user
 # Test should fail - we haven't implemented yet
 ```
 
@@ -54,7 +55,7 @@ public function store(StoreOrderRequest $request): JsonResponse
 
 ### Step 4: Run Test (Verify it PASSES)
 ```bash
-./vendor/bin/pest tests/Feature/OrderTest.php
+php artisan test --filter=test_creates_an_order_for_authenticated_user
 # Test should now pass
 ```
 
@@ -65,11 +66,11 @@ public function store(StoreOrderRequest $request): JsonResponse
 
 ### Step 6: Verify Coverage
 ```bash
-./vendor/bin/pest --coverage
+php artisan test --coverage
 # Verify 80%+ coverage
 ```
 
-## Pest PHP Test Types
+## PHPUnit Test Types
 
 ### Unit Tests
 Test isolated classes without database:
@@ -77,35 +78,48 @@ Test isolated classes without database:
 ```php
 <?php
 
+declare(strict_types=1);
+
+namespace Tests\Unit\Services;
+
 use App\Services\PriceCalculator;
+use InvalidArgumentException;
+use PHPUnit\Framework\TestCase;
 
-describe('PriceCalculator', function () {
-    it('calculates subtotal correctly', function () {
-        $calculator = new PriceCalculator();
+final class PriceCalculatorTest extends TestCase
+{
+    private PriceCalculator $calculator;
 
-        $result = $calculator->subtotal([
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->calculator = new PriceCalculator();
+    }
+
+    public function test_calculates_subtotal_correctly(): void
+    {
+        $result = $this->calculator->subtotal([
             ['price' => 100, 'quantity' => 2],
             ['price' => 50, 'quantity' => 3],
         ]);
 
-        expect($result)->toBe(350);
-    });
+        $this->assertSame(350, $result);
+    }
 
-    it('applies discount percentage', function () {
-        $calculator = new PriceCalculator();
+    public function test_applies_discount_percentage(): void
+    {
+        $result = $this->calculator->applyDiscount(100, 10);
 
-        $result = $calculator->applyDiscount(100, 10);
+        $this->assertSame(90, $result);
+    }
 
-        expect($result)->toBe(90);
-    });
+    public function test_throws_for_invalid_discount(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
 
-    it('throws for invalid discount', function () {
-        $calculator = new PriceCalculator();
-
-        expect(fn () => $calculator->applyDiscount(100, 150))
-            ->toThrow(InvalidArgumentException::class);
-    });
-});
+        $this->calculator->applyDiscount(100, 150);
+    }
+}
 ```
 
 ### Feature Tests
@@ -114,13 +128,21 @@ Test HTTP endpoints and database:
 ```php
 <?php
 
+declare(strict_types=1);
+
+namespace Tests\Feature\Http\Controllers;
+
 use App\Models\User;
 use App\Models\Order;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
 
-uses(Illuminate\Foundation\Testing\RefreshDatabase::class);
+final class OrderControllerTest extends TestCase
+{
+    use RefreshDatabase;
 
-describe('Order API', function () {
-    it('creates order for authenticated user', function () {
+    public function test_creates_order_for_authenticated_user(): void
+    {
         $user = User::factory()->create();
 
         $response = $this->actingAs($user)
@@ -138,15 +160,17 @@ describe('Order API', function () {
         $this->assertDatabaseHas('orders', [
             'user_id' => $user->id,
         ]);
-    });
+    }
 
-    it('requires authentication', function () {
+    public function test_requires_authentication(): void
+    {
         $response = $this->postJson('/api/orders', []);
 
         $response->assertUnauthorized();
-    });
+    }
 
-    it('validates request data', function () {
+    public function test_validates_request_data(): void
+    {
         $user = User::factory()->create();
 
         $response = $this->actingAs($user)
@@ -154,21 +178,31 @@ describe('Order API', function () {
 
         $response->assertUnprocessable()
             ->assertJsonValidationErrors(['items']);
-    });
-});
+    }
+}
 ```
 
 ### Testing Actions
 ```php
 <?php
 
+declare(strict_types=1);
+
+namespace Tests\Feature\Actions;
+
 use App\Actions\Order\CreateOrderAction;
+use App\Models\Order;
 use App\Models\User;
+use Exception;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
 
-uses(Illuminate\Foundation\Testing\RefreshDatabase::class);
+final class CreateOrderActionTest extends TestCase
+{
+    use RefreshDatabase;
 
-describe('CreateOrderAction', function () {
-    it('creates order with items', function () {
+    public function test_creates_order_with_items(): void
+    {
         $user = User::factory()->create();
         $action = new CreateOrderAction();
 
@@ -176,33 +210,37 @@ describe('CreateOrderAction', function () {
             ['product_id' => 1, 'quantity' => 2],
         ]);
 
-        expect($order)->toBeInstanceOf(Order::class);
-        expect($order->items)->toHaveCount(1);
-    });
+        $this->assertInstanceOf(Order::class, $order);
+        $this->assertCount(1, $order->items);
+    }
 
-    it('wraps in transaction', function () {
+    public function test_wraps_in_transaction(): void
+    {
         $user = User::factory()->create();
         $action = new CreateOrderAction();
 
+        $this->expectException(Exception::class);
+
         // Simulate failure
-        expect(fn () => $action->execute($user, [
+        $action->execute($user, [
             ['product_id' => 999, 'quantity' => 1], // Invalid
-        ]))->toThrow(Exception::class);
+        ]);
 
         // Order should not be created
-        expect($user->orders)->toHaveCount(0);
-    });
-});
+        $this->assertCount(0, $user->orders);
+    }
+}
 ```
 
-## Mocking in Pest
+## Mocking in PHPUnit
 
 ### Mock External Services
 ```php
 use App\Services\PaymentGateway;
 use Mockery;
 
-it('processes payment', function () {
+public function test_processes_payment(): void
+{
     $gateway = Mockery::mock(PaymentGateway::class);
     $gateway->shouldReceive('charge')
         ->once()
@@ -212,7 +250,7 @@ it('processes payment', function () {
     $this->app->instance(PaymentGateway::class, $gateway);
 
     // Test code that uses PaymentGateway
-});
+}
 ```
 
 ### Laravel Fakes
@@ -221,7 +259,8 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Notification;
 
-it('sends order confirmation email', function () {
+public function test_sends_order_confirmation_email(): void
+{
     Mail::fake();
 
     $order = Order::factory()->create();
@@ -230,16 +269,17 @@ it('sends order confirmation email', function () {
     Mail::assertSent(OrderConfirmation::class, function ($mail) use ($order) {
         return $mail->hasTo($order->user->email);
     });
-});
+}
 
-it('queues order processing', function () {
+public function test_queues_order_processing(): void
+{
     Queue::fake();
 
     $order = Order::factory()->create();
     ProcessOrder::dispatch($order);
 
     Queue::assertPushed(ProcessOrder::class);
-});
+}
 ```
 
 ## Test Assertions
@@ -260,18 +300,18 @@ $response->assertJsonCount(3, 'data');
 $response->assertJsonPath('data.0.id', 1);
 ```
 
-### Pest Expectations
+### PHPUnit Assertions
 ```php
-expect($value)->toBe(5);
-expect($value)->toBeTrue();
-expect($value)->toBeFalse();
-expect($value)->toBeNull();
-expect($value)->toBeEmpty();
-expect($value)->toHaveCount(3);
-expect($value)->toContain('item');
-expect($value)->toBeInstanceOf(User::class);
-expect($value)->toHaveKey('email');
-expect(fn () => throw new Exception())->toThrow(Exception::class);
+$this->assertSame(5, $value);
+$this->assertTrue($value);
+$this->assertFalse($value);
+$this->assertNull($value);
+$this->assertEmpty($value);
+$this->assertCount(3, $value);
+$this->assertContains('item', $value);
+$this->assertInstanceOf(User::class, $value);
+$this->assertArrayHasKey('email', $value);
+$this->expectException(Exception::class);
 ```
 
 ### Database Assertions
@@ -302,7 +342,6 @@ tests/
 │       └── OrderDataTest.php
 ├── Browser/           # Dusk tests
 │   └── LoginTest.php
-├── Pest.php
 └── TestCase.php
 ```
 
@@ -310,32 +349,29 @@ tests/
 
 ```bash
 # Run with coverage
-./vendor/bin/pest --coverage
+php artisan test --coverage
 
 # Generate HTML report
-./vendor/bin/pest --coverage --coverage-html=coverage
+php artisan test --coverage-html=coverage
 
 # Minimum coverage threshold
-./vendor/bin/pest --coverage --min=80
+php artisan test --coverage --min=80
 ```
 
 ## Test Commands
 
 ```bash
 # Run all tests
-./vendor/bin/pest
+php artisan test --compact
 
 # Run specific file
-./vendor/bin/pest tests/Feature/OrderTest.php
+php artisan test tests/Feature/Http/Controllers/OrderControllerTest.php
 
 # Run specific test
-./vendor/bin/pest --filter="creates order"
+php artisan test --filter=test_creates_order
 
 # Run in parallel
-./vendor/bin/pest --parallel
-
-# Watch mode (requires fswatch)
-./vendor/bin/pest --watch
+php artisan test --parallel
 ```
 
 ## Edge Cases to Test

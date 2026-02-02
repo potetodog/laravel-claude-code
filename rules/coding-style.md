@@ -31,41 +31,46 @@ namespace App\Services;
 
 final class UserService
 {
-    public function __construct(
-        private readonly UserRepository $users,
-    ) {}
-
     public function findById(int $id): ?User
     {
-        return $this->users->find($id);
+        return User::find($id);
     }
 }
 ```
 
-## Immutability Pattern
+## DTOs with spatie/laravel-data
 
-Prefer immutable objects:
+Use `spatie/laravel-data` for Data Transfer Objects:
 
 ```php
-// WRONG: Mutable
-class UserData {
-    public string $name;
-    public string $email;
-}
+<?php
 
-// CORRECT: Immutable with readonly
-final readonly class UserData
+declare(strict_types=1);
+
+namespace App\DTOs;
+
+use Spatie\LaravelData\Data;
+
+final class UserData extends Data
 {
     public function __construct(
         public string $name,
         public string $email,
+        public ?string $phone = null,
     ) {}
-
-    public function withName(string $name): self
-    {
-        return new self($name, $this->email);
-    }
 }
+
+// Usage: Create from request
+$userData = UserData::from($request);
+
+// Usage: Create from array
+$userData = UserData::from([
+    'name' => 'John',
+    'email' => 'john@example.com',
+]);
+
+// Usage: Transform to array
+$array = $userData->toArray();
 ```
 
 ## File Organization
@@ -73,10 +78,11 @@ final readonly class UserData
 Follow Laravel conventions:
 - `app/Http/Controllers/` - HTTP controllers (thin, delegate to services)
 - `app/Services/` - Business logic
-- `app/Actions/` - Single-purpose action classes
 - `app/Models/` - Eloquent models
-- `app/DTOs/` - Data Transfer Objects
+- `app/DTOs/` - Data Transfer Objects (using `spatie/laravel-data`)
 - `app/Enums/` - PHP Enums
+
+**Note**: This project does NOT use the Repository pattern or Actions pattern. Business logic should be placed in Services.
 
 File size guidelines:
 - Controllers: < 200 lines (prefer single action controllers)
@@ -166,7 +172,7 @@ public function store(StoreUserRequest $request): RedirectResponse
 Before marking work complete:
 - [ ] `declare(strict_types=1)` in all PHP files
 - [ ] Laravel Pint passes (`./vendor/bin/pint --test`)
-- [ ] PHPStan level 8+ passes
+- [ ] PHPStan level 4+ passes
 - [ ] No `dd()`, `dump()`, or `ray()` calls
 - [ ] No hardcoded values (use config/env)
 - [ ] Proper type hints on all methods
